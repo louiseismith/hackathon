@@ -1,0 +1,18 @@
+# Data generation scripts and schema (internal use only)
+scripts/
+schema.sql
+data/
+
+# Environment
+.env
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# R
+.Rhistory
+.RData
+.Rproj.user/
