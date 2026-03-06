@@ -1,0 +1,60 @@
+cd_id,borough,community_district,neighborhood
+MN-01,Manhattan,1,Financial District / Battery Park
+MN-02,Manhattan,2,Greenwich Village / SoHo
+MN-03,Manhattan,3,Lower East Side
+MN-04,Manhattan,4,Chelsea / Clinton
+MN-05,Manhattan,5,Midtown
+MN-06,Manhattan,6,Stuyvesant Town / Turtle Bay
+MN-07,Manhattan,7,Upper West Side
+MN-08,Manhattan,8,Upper East Side
+MN-09,Manhattan,9,Morningside Heights / West Harlem
+MN-10,Manhattan,10,Central Harlem
+MN-11,Manhattan,11,East Harlem
+MN-12,Manhattan,12,Washington Heights / Inwood
+BX-01,Bronx,1,Mott Haven / Hunts Point
+BX-02,Bronx,2,Longwood / Melrose
+BX-03,Bronx,3,Morrisania / Crotona
+BX-04,Bronx,4,Highbridge / Concourse
+BX-05,Bronx,5,University Heights / Fordham
+BX-06,Bronx,6,East Tremont / Belmont
+BX-07,Bronx,7,Bedford Park / Norwood
+BX-08,Bronx,8,Riverdale / Kingsbridge
+BX-09,Bronx,9,Throgs Neck / Co-op City
+BX-10,Bronx,10,Pelham Parkway / Morris Park
+BX-11,Bronx,11,Pelham Bay / Williamsbridge
+BX-12,Bronx,12,Wakefield / Eastchester
+BK-01,Brooklyn,1,Greenpoint / Williamsburg
+BK-02,Brooklyn,2,Brooklyn Heights / Fort Greene
+BK-03,Brooklyn,3,Bedford-Stuyvesant
+BK-04,Brooklyn,4,Bushwick
+BK-05,Brooklyn,5,East New York
+BK-06,Brooklyn,6,Park Slope / Carroll Gardens
+BK-07,Brooklyn,7,Sunset Park
+BK-08,Brooklyn,8,Crown Heights / Prospect Heights
+BK-09,Brooklyn,9,Crown Heights South / Prospect Lefferts
+BK-10,Brooklyn,10,Bay Ridge / Dyker Heights
+BK-11,Brooklyn,11,Bensonhurst / Bath Beach
+BK-12,Brooklyn,12,Borough Park
+BK-13,Brooklyn,13,Coney Island / Brighton Beach
+BK-14,Brooklyn,14,Flatbush / Midwood
+BK-15,Brooklyn,15,Sheepshead Bay / Gerritsen Beach
+BK-16,Brooklyn,16,Brownsville
+BK-17,Brooklyn,17,East Flatbush
+BK-18,Brooklyn,18,Canarsie / Flatlands
+QN-01,Queens,1,Astoria / Long Island City
+QN-02,Queens,2,Sunnyside / Woodside
+QN-03,Queens,3,Jackson Heights / East Elmhurst
+QN-04,Queens,4,Elmhurst / Corona
+QN-05,Queens,5,Ridgewood / Maspeth
+QN-06,Queens,6,Rego Park / Forest Hills
+QN-07,Queens,7,Flushing / Whitestone
+QN-08,Queens,8,Hillcrest / Fresh Meadows
+QN-09,Queens,9,Kew Gardens / Woodhaven
+QN-10,Queens,10,Howard Beach / Ozone Park
+QN-11,Queens,11,Bayside / Little Neck
+QN-12,Queens,12,Jamaica / Hollis
+QN-13,Queens,13,Queens Village / Cambria Heights
+QN-14,Queens,14,Rockaways
+SI-01,Staten Island,1,St. George / Stapleton
+SI-02,Staten Island,2,South Beach / New Springville
+SI-03,Staten Island,3,Tottenville / Great Kills
