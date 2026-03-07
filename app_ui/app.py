@@ -1386,7 +1386,7 @@ app_ui = ui.page_fillable(
                     ui.HTML(
                         "<strong>Heat Index Risk</strong>: Risk of dangerous outdoor heat conditions using temperature and humidity (1-100 scale). "
                         "<br><strong>Hospital Capacity</strong>: Percent of hospital beds occupied. "
-                        "<br><strong>Transit Delay Index</strong>: Index of infrastructure quality and disruption (1-100 scale). "
+                        "<br><strong>Transit Index</strong>: Index of infrastructure quality and disruption (1-100 scale). "
                         "<br><strong>Composite Score</strong>: Combined index of heat, hospital, and transit risk (higher = more risk). "
                         "<br><span style='font-size:7.5px;color:#64748b;margin-top:3px;display:inline-block;'>*Values shown on the map are 7-day rolling averages.</span>"
                     ),
