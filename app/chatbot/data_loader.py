@@ -93,6 +93,38 @@ def query_for_date_range(start_date: str, end_date: str, cd_id: str | None = Non
     return _run(_BASE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY h.date", params)
 
 
+def query_monthly_baseline(cd_id: str, month: int, exclude_date: str, current_values: dict | None = None) -> dict:
+    """Percentile distribution for a CD for a specific calendar month across all years, excluding today.
+
+    Returns p50/p90 for each metric, plus the percentile rank of each current value if provided.
+    """
+    sql = (
+        _BASE_SELECT
+        + " WHERE h.cd_id = %s AND EXTRACT(MONTH FROM h.date) = %s AND h.date != %s"
+    )
+    df = _run(sql, [cd_id, month, exclude_date])
+    if df.empty:
+        return {}
+
+    result: dict = {"years_of_data": int(df["date"].dt.year.nunique())}
+
+    _metrics = [
+        ("heat_index_risk",    "heat_index_risk"),
+        ("total_capacity_pct", "total_capacity_pct"),
+        ("transit_delay_index","transit_delay_index"),
+        ("ed_wait_hours",      "ed_wait_hours"),
+    ]
+    for key, col in _metrics:
+        result[f"{key}_p50"] = round(float(df[col].quantile(0.50)), 2)
+        result[f"{key}_p90"] = round(float(df[col].quantile(0.90)), 2)
+        if current_values and key in current_values:
+            result[f"{key}_percentile"] = round(
+                float((df[col] <= current_values[key]).mean() * 100), 1
+            )
+
+    return result
+
+
 def query_full_history(cd_id: str | None = None, borough: str | None = None) -> pd.DataFrame:
     """Full history for one CD or borough — used by the multiyear trend tool."""
     where, params = [], []

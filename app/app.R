@@ -66,6 +66,8 @@ ui <- navbarPage(
     .metric-label { font-size: 11px; color: #888; margin-bottom: 12px; }
     /* Make chat tab fill the viewport */
     #chat-tab-content { height: calc(100vh - 60px); display: flex; flex-direction: column; }
+    #chat-tab-content bslib-sidebar-layout { flex: 1 1 0; min-height: 0; }
+    #chat-tab-content #chat_container { height: 100%; }
   "))),
 
   # --- Tab 1: Map ---
@@ -123,6 +125,7 @@ ui <- navbarPage(
     "Chatbot",
     div(id = "chat-tab-content",
       layout_sidebar(
+        fill = TRUE,
         sidebar = sidebar(
           width = 280,
           h5("Suggested prompts"),
@@ -131,9 +134,10 @@ ui <- navbarPage(
           actionButton("prompt3", "How does today compare to similar historical patterns?",     class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
           actionButton("prompt4", "Is summer heat risk getting worse year over year?",          class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
           actionButton("prompt5", "How has hospital capacity changed since 2020?",              class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
-          hr()
+          hr(),
+          actionButton("clear_chat", "Clear chat", class = "btn-sm btn-outline-secondary btn-block")
         ),
-        chat_ui("chat", fill = TRUE, placeholder = "Ask about NYC Community District risk (e.g. heat, hospital, transit)...")
+        uiOutput("chat_container", fill = TRUE)
       )
     )
   )
@@ -145,13 +149,14 @@ server <- function(input, output, session) {
 
   # --- Chatbot helpers ---
   chat_history <- reactiveVal(NULL)
+  chat_generation <- reactiveVal(0)
+
+  output$chat_container <- renderUI({
+    chat_generation()  # take dependency so clear button triggers re-render
+    chat_ui("chat", fill = TRUE, placeholder = "Ask about NYC Community District risk (e.g. heat, hospital, transit)...")
+  })
 
   call_chat_api <- function(msg) {
-    nid <- showNotification(
-      tagList(tags$strong("Thinking..."), " this may take a few seconds"),
-      duration = NULL, closeButton = FALSE, type = "message"
-    )
-    on.exit(removeNotification(nid))
     tryCatch({
       result <- chatbot_agent$run_chat(
         msg,
@@ -169,7 +174,14 @@ server <- function(input, output, session) {
     chat_append("chat", call_chat_api(msg))
   })
 
-  suggest_send <- function(prompt) chat_append("chat", call_chat_api(prompt))
+  observeEvent(input$clear_chat, {
+    chat_history(NULL)
+    chat_generation(chat_generation() + 1)
+  })
+
+  suggest_send <- function(prompt) {
+    update_chat_user_input("chat", value = prompt, submit = TRUE)
+  }
   observeEvent(input$prompt1, suggest_send("Which neighborhoods show rising heat and hospital strain?"))
   observeEvent(input$prompt2, suggest_send("Where is risk accelerating the fastest?"))
   observeEvent(input$prompt3, suggest_send("How does today compare to similar historical patterns?"))
