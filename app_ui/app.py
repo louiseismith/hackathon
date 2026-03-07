@@ -668,14 +668,19 @@ html, body {
     top: 0;
     z-index: 10;
     flex-shrink: 0;
-    background: #ffffff;
+    background: transparent !important;
     padding-bottom: 4px;
 }
-/* Sidebar prompt buttons — smaller */
+/* Sidebar prompt buttons — smaller, no white background */
 .chat-panel-prompts .btn {
     font-size: 10px !important;
     padding: 4px 8px !important;
     line-height: 1.3 !important;
+    background: transparent !important;
+    border-color: rgba(37,99,235,0.5) !important;
+}
+.chat-panel-prompts .btn-outline-secondary {
+    border-color: rgba(100,116,139,0.5) !important;
 }
 .chat-panel-prompts .btn-sm { font-size: 10px !important; }
 .chat-panel-messages {
@@ -691,7 +696,7 @@ html, body {
     padding: 8px 0 0 0;
     margin-top: 6px;
     border-top: 1px solid rgba(0,0,0,0.08);
-    background: #ffffff;
+    background: transparent !important;
 }
 .chat-panel-input .btn { font-size: 10px !important; padding: 4px 10px !important; }
 
@@ -1006,6 +1011,9 @@ html, body {
 #chat_send, #clear_chat {
     cursor: pointer !important;
 }
+#prompt1, #prompt2, #prompt3, #prompt4, #prompt5, #clear_chat {
+    background: transparent !important;
+}
 
 #chat_input {
     cursor: text !important;
@@ -1014,6 +1022,7 @@ html, body {
     padding: 6px 10px !important;
     font-size: 11px !important;
     border: 1px solid rgba(0,0,0,0.1) !important;
+    background: transparent !important;
     transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
 }
 #chat_input:focus {
