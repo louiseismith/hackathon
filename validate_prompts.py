@@ -94,6 +94,7 @@ def score_response(question: str, response: str, tool_outputs: str, client: Open
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--date", default=DEFAULT_DATE, help="Test date (YYYY-MM-DD)")
+    parser.add_argument("--verbose", "-v", action="store_true", help="Print full response text")
     args = parser.parse_args()
 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -119,6 +120,8 @@ def main():
         print(f"avg={avg:.1f}  [{score_str}]")
         if scores.get("notes"):
             print(f"  {scores['notes']}")
+        if args.verbose:
+            print(f"\n  Response:\n  {response.strip()}\n")
 
         results.append(scores)
 
