@@ -2,8 +2,6 @@
 
 A cloud-based AI decision-support tool for the NYC Department of Emergency Management. Stores and analyzes neighborhood-level time-series data across heat, hospital capacity, and transit — and surfaces AI-generated risk summaries for decision-makers.
 
-Built for SYSEN 5381 (Cornell), Spring 2026.
-
 ---
 
 ## Table of contents
@@ -27,7 +25,7 @@ Built for SYSEN 5381 (Cornell), Spring 2026.
 
 NYC Risk Horizon is a split-panel dashboard. The right side is always the map; the left sidebar switches between two modes via tabs.
 
-**Map (right panel)** — An interactive choropleth of all 59 NYC Community Districts. Use the dropdowns to filter by district, metric (Heat Index, Hospital Capacity, or Transit Index), and date (month/day/year). Click Search to update the map. Below the map: a "Top Communities At Risk" leaderboard and a 30-day trend chart for the selected metric. Clicking a district populates a metric summary card in the upper-right corner showing Heat Index Risk, Hospital Capacity %, ICU Capacity %, ED Wait Hours, Transit Delay Index, and a Composite Risk Score — each with a trend arrow.
+**Map (right panel)** — An interactive choropleth of all 59 NYC Community Districts, colored by the selected risk metric. Controls at the top let you choose a district, metric, and date; click Search to update. All map values are 7-day rolling averages. Clicking a district opens a summary card (upper right) with all five metrics and a Composite Risk Score, each showing a trend arrow relative to the prior period. Below the map: a ranked "Top Communities At Risk" table and a 30-day trend chart for the active metric.
 
 **AI Summary tab (left sidebar)** — When a district is selected, this tab auto-populates with two AI-generated panels for that district:
 - *Risk Overview* — a 2–3 sentence plain-language summary of current conditions
@@ -195,7 +193,7 @@ COVID Omicron wave peak — the highest hospital strain day in the dataset. Aver
 **Suggested queries:**
 - "Which neighborhoods show the highest hospital strain?" → uses `get_top_risk_cds` with `factor=hospital`
 - "How has hospital capacity changed since 2020 in the Bronx?" → uses `get_multiyear_trend`
-- "Is summer heat risk getting worse year over year?" → uses `get_multiyear_trend` with seasonal filter
+- "Is winter hospital strain getting worse year over year?" → uses `get_multiyear_trend` with seasonal filter
 
 ![AI Summary panel for Elmhurst/Corona (QN-04) on January 13, 2022 — hospital capacity at maximum, flagged as critical](docs/220113_1.png)
 ![Chatbot response listing neighborhoods at 100% hospital bed capacity](docs/220113_2.png)
