@@ -1052,6 +1052,10 @@ button#prompt4:hover, button#prompt5:hover {
 }
 .chat-bubble-bot p { margin: 4px 0; }
 .chat-bubble-bot strong { font-weight: 700; }
+.chat-bubble-bot h1, .chat-bubble-bot h2, .chat-bubble-bot h3,
+.chat-bubble-bot h4, .chat-bubble-bot h5, .chat-bubble-bot h6 {
+    font-size: 12px !important; font-weight: 700; margin: 6px 0 2px;
+}
 
 /* Chat bubbles - messages app style; fills scrollable parent */
 .chat-area {
@@ -1243,6 +1247,66 @@ app_ui = ui.page_fillable(
                         ),
                         ui.div(
                             ui.div(ui.output_ui("chat_messages_ui"), class_="chat-panel-messages"),
+                            ui.HTML("""
+                            <div id="chat-typing-indicator" style="display:none;padding:4px 8px;">
+                              <div class="chat-bubble-bot" style="padding:0;background:rgba(0,0,0,0.05);">
+                                <div class="typing-indicator"><span></span><span></span><span></span></div>
+                              </div>
+                            </div>
+                            <script>
+                            (function() {
+                              var botCountAtSend = 0;
+                              function escHtml(s) {
+                                return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                              }
+                              function scrollChat() {
+                                var el = document.querySelector('.chat-panel-messages-scroll');
+                                if (el) el.scrollTop = el.scrollHeight;
+                              }
+                              function showTyping() {
+                                document.getElementById('chat-typing-indicator').style.display = 'block';
+                                setTimeout(scrollChat, 20);
+                              }
+                              function hideTyping() {
+                                document.getElementById('chat-typing-indicator').style.display = 'none';
+                              }
+                              function sendMessage(msg) {
+                                if (!msg) return;
+                                // Snapshot bot count before this send
+                                botCountAtSend = $('#chat_messages_ui .chat-bubble-bot').length;
+                                // Inject user bubble immediately
+                                var $area = $('#chat_messages_ui .chat-area');
+                                if ($area.length) {
+                                  $area.append('<div class="chat-bubble-user">' + escHtml(msg) + '</div>');
+                                }
+                                showTyping();
+                              }
+                              $(document).on('click', '#chat_send', function() {
+                                var msg = ($('#chat_input').val() || '').trim();
+                                if (msg) sendMessage(msg);
+                              });
+                              $(document).on('click', '#prompt1, #prompt2, #prompt3, #prompt4, #prompt5', function() {
+                                sendMessage($(this).text().trim());
+                              });
+                              $(document).on('keydown', '#chat_input', function(e) {
+                                if (e.key === 'Enter') { e.preventDefault(); $('#chat_send').click(); }
+                              });
+                              // Hide dots only once a new bot bubble has appeared
+                              $(document).on('shiny:value', function(e) {
+                                if (e.target.id !== 'chat_messages_ui') return;
+                                setTimeout(function() {
+                                  var current = $('#chat_messages_ui .chat-bubble-bot').length;
+                                  if (current > botCountAtSend) {
+                                    hideTyping();
+                                    scrollChat();
+                                  } else {
+                                    scrollChat();
+                                  }
+                                }, 50);
+                              });
+                            })();
+                            </script>
+                            """),
                             class_="chat-panel-messages-scroll",
                         ),
                         ui.div(
@@ -1341,7 +1405,6 @@ def server(input, output, session):
     selected_cd   = reactive.Value(None)
     chat_msgs     = reactive.Value([])
     chat_history  = reactive.Value(None)   # PydanticAI ModelMessage history
-    is_typing         = reactive.Value(False)
     search_error  = reactive.Value("")
     _default_date = max(DATE_MIN, min(DATE_MAX, pd.Timestamp("2026-03-06").date()))
     applied_date  = reactive.Value(_default_date)
@@ -1623,7 +1686,6 @@ def server(input, output, session):
         if not msg or not msg.strip():
             return
         chat_msgs.set(chat_msgs() + [{"role": "user", "content": msg}])
-        is_typing.set(True)
         date_str = str(applied_date())
         history  = chat_history()
         try:
@@ -1635,8 +1697,6 @@ def server(input, output, session):
             chat_history.set(result["history"])
         except Exception as e:
             response = f"Error: {e}"
-        finally:
-            is_typing.set(False)
         chat_msgs.set(chat_msgs() + [{"role": "assistant", "content": response}])
 
     @reactive.effect
@@ -1684,11 +1744,7 @@ def server(input, output, session):
                 ui.p(
                     "I can help you analyze current risk across NYC Community Districts. "
                     "What do you want to learn about?",
-                    style=(
-                        "font-size:11px;color:#334155;"
-                        "background:rgba(0,0,0,0.04);"
-                        "border-radius:6px;padding:8px;margin:0;"
-                    ),
+                    style="font-size:11px;color:#64748b;margin:0;padding:4px 2px;",
                 ),
                 class_="chat-area",
             )
@@ -1702,14 +1758,6 @@ def server(input, output, session):
                     extensions=["tables", "nl2br"],
                 )
                 items.append(ui.div(ui.HTML(rendered), class_="chat-bubble-bot"))
-        if is_typing():
-            items.append(
-                ui.div(
-                    ui.HTML('<div class="typing-indicator"><span></span><span></span><span></span></div>'),
-                    class_="chat-bubble-bot",
-                    style="padding:0;background:rgba(0,0,0,0.05);",
-                )
-            )
         return ui.div(*items, class_="chat-area")
 
 
