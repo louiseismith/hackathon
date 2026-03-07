@@ -6,15 +6,17 @@ Built for SYSEN 5381 (Cornell), Spring 2026.
 
 ---
 
-<!-- TODO(louise): Update this section once UI is finalized — app views and tab names may change depending on whether the frontend stays in R Shiny or moves to Python. -->
-
 ## What it does
 
-The app has two views:
+NYC Risk Horizon is a split-panel dashboard. The right side is always the map; the left sidebar switches between two modes via tabs.
 
-**Risk Map** — An interactive choropleth map of all 59 NYC Community Districts. Select a date, choose a risk factor (heat, hospital capacity, or transit delay), and explore the composite risk index. Click any district to see an AI-generated risk overview and decision signals panel.
+**Map (right panel)** — An interactive choropleth of all 59 NYC Community Districts. Use the dropdowns to filter by district, metric (Heat Index, Hospital Capacity, or Transit Index), and date (month/day/year). Click Search to update the map. Below the map: a "Top Communities At Risk" leaderboard and a 30-day trend chart for the selected metric. Clicking a district populates a metric summary card in the upper-right corner showing Heat Index Risk, Hospital Capacity %, ICU Capacity %, ED Wait Hours, Transit Delay Index, and a Composite Risk Score — each with a trend arrow.
 
-**AI Assistant** — A conversational chatbot for emergency management personnel. Ask questions in natural language about current conditions, trends, accelerating risks, and historical patterns. The assistant uses 7 analytical tools backed by a Supabase database of ~133,000 daily records per metric.
+**AI Summary tab (left sidebar)** — When a district is selected, this tab auto-populates with two AI-generated panels for that district:
+- *Risk Overview* — a 2–3 sentence plain-language summary of current conditions
+- *Decision Signals* — early-warning language for NYCEM personnel, flagging which domains warrant closer attention
+
+**Chatbot tab (left sidebar)** — A conversational assistant for open-ended analysis. Five suggested prompts are shown on load; users can also type any question. The assistant uses 7 analytical tools backed by a Supabase database of ~133,000 daily records per metric and answers in natural language about current conditions, trends, accelerating risks, and historical patterns.
 
 ---
 
@@ -22,7 +24,7 @@ The app has two views:
 
 ### Prerequisites
 
-- R (>= 4.3) and Python (>= 3.11)
+- Python >= 3.11
 - [uv](https://github.com/astral-sh/uv) for Python package management
 - A Supabase project with the schema loaded (see `schema.sql`)
 - API keys: `OPENAI_API_KEY`, Supabase connection credentials
@@ -52,48 +54,37 @@ uv venv
 uv pip install -r requirements.txt
 ```
 
-### 3. Install R dependencies
+### 3. Load data into Supabase
 
-<!-- TODO(louise): If frontend moves to Python, this section and install_packages.R can be removed entirely. -->
-
-```r
-source("install_packages.R")
-```
-
-> **macOS:** `sf` requires system libraries. Run first:
-> ```bash
-> brew install gdal geos proj
-> ```
->
-> **Linux (Debian/Ubuntu):**
-> ```bash
-> apt-get install libgdal-dev libgeos-dev libproj-dev
-> ```
-
-### 4. Load data into Supabase
-
-If starting from scratch, generate synthetic data and upload:
+The processed CSV files are in `data/`. Load them into your Supabase project using `psql`:
 
 ```bash
-uv run scripts/generate_heat_index.py
-uv run scripts/generate_hospital_capacity.py
-uv run scripts/generate_transit_delays.py
-uv run scripts/upload_to_supabase.py
+psql "$DATABASE_URL" -f schema.sql
+
+psql "$DATABASE_URL" -c "\copy community_districts FROM 'data/community_districts.csv' CSV HEADER"
+psql "$DATABASE_URL" -c "\copy heat_index FROM 'data/heat_index.csv' CSV HEADER"
+psql "$DATABASE_URL" -c "\copy hospital_capacity FROM 'data/hospital_capacity.csv' CSV HEADER"
+psql "$DATABASE_URL" -c "\copy transit_delays FROM 'data/transit_delays.csv' CSV HEADER"
 ```
 
-### 5. Run the app
+`DATABASE_URL` follows the format `postgresql://user:password@host:port/dbname`.
 
-```r
-shiny::runApp("app/app.R")
+### 4. Run the app
+
+```bash
+uv run shiny run app_ui/app.py
 ```
+
+The app will be available at `http://localhost:8000`.
 
 ---
 
 ## Architecture
 
 ```
+app_ui/
+  app.py                 — Shiny for Python app (map tab + chatbot tab)
 app/
-  app.R                  — Shiny app (map tab + chatbot tab)
   backend.py             — Supabase queries for the map (7-day averages)
   nyc_cd_boundaries.geojson
   chatbot/
@@ -102,17 +93,18 @@ app/
     data_loader.py       — On-demand Supabase queries via SQLAlchemy
     analogs.py           — KNN-based historical analog search
 scripts/
-  generate_*.py          — Synthetic data generation
-  upload_to_supabase.py  — Bulk upload to Supabase
-  validate_prompts.py    — Chatbot quality checker
+  validate_prompts.py    — Chatbot quality checker (GPT-4o scorer)
   validate_cd_summaries.py — Map panel quality checker
   find_test_dates.py     — Query DB for interesting event dates
 data/
-  DATA_GENERATION.md     — Full data codebook and synthetic methodology
+  community_districts.csv
+  heat_index.csv
+  hospital_capacity.csv
+  transit_delays.csv
+  DATA_GENERATION.md     — Synthetic methodology and data documentation
 ```
 
-<!-- TODO(louise): Update stack once UI is finalized — may switch from R Shiny + reticulate to a Python-native frontend. -->
-**Stack:** R Shiny + shinychat (frontend) · Python via reticulate (chatbot backend) · PydanticAI + GPT-4o (AI agent) · Supabase / PostgreSQL (data store) · Leaflet (map)
+**Stack:** Python Shiny + shinychat (frontend) · PydanticAI + GPT-4o (AI agent) · Supabase / PostgreSQL (data store) · Folium / Leaflet (map)
 
 ---
 
@@ -177,7 +169,7 @@ The AI assistant uses 7 analytical tools. All accept dates in `YYYY-MM-DD` forma
 | `start_date` | string       | null       | If provided, finds CDs above thresholds on average over the range |
 | `top_k`      | int          | 20         | Max results |
 
-**Thresholds:** heat_index_risk ≥ 50, total_capacity_pct ≥ 85%, transit_delay_index ≥ 30.
+**Thresholds:** heat_index_risk >= 50, total_capacity_pct >= 85%, transit_delay_index >= 30.
 
 **Returns:** Districts meeting all specified factor conditions, with average values and days-elevated counts (range mode).
 
@@ -230,7 +222,6 @@ The AI assistant uses 7 analytical tools. All accept dates in `YYYY-MM-DD` forma
 
 - **Date selector** — "Week ending" date picker; map displays 7-day average for heat and hospital metrics, 7-day maximum for transit
 - **Metric selector** — Heat Index Risk, Hospital Capacity %, Transit Delay Index
-- **Combined Risk Index** — Composite score blending all selected factors
 - **Click a district** — Opens a panel with AI-generated Risk Overview (2–3 sentence summary) and Decision Signals (early-warning language for NYCEM personnel)
 - **Color scale** — Plasma palette (perceptually uniform, color-blind accessible)
 
@@ -240,11 +231,21 @@ The AI assistant uses 7 analytical tools. All accept dates in `YYYY-MM-DD` forma
 
 Three curated test cases demonstrating different risk states, verified against the database. Use these with the chatbot or map.
 
-> **Baseline / no-event day:** Select **2026-03-06** (the most recent date in the dataset) to see the system under normal, non-event conditions. The AI will note that conditions are typical for this time of year — useful for confirming the tool doesn't over-alert.
+---
+
+### Baseline: Normal conditions (2026-03-06)
+
+The most recent date in the dataset. Conditions are typical for early March — moderate hospital occupancy, low heat, routine transit. Use this to confirm the system doesn't over-alert under normal conditions and to explore the map interface.
+
+**Suggested queries:**
+- "What's the overall risk picture today?" → uses `get_top_risk_cds`
+- "Are there any neighborhoods worth watching right now?" → uses `get_cd_snapshot`
+- "How does today compare to recent history in BX-03?" → uses `compare_to_historical_analogs`
 
 ---
 
 ### Scenario 1: Summer heat wave — South Bronx (2025-07-18)
+
 The highest-heat day in the dataset. Average heat_index_risk of 96.7 across the city's highest-risk CDs (BX-01–03, MN-11, BK-16), with multiple districts hitting the maximum score of 100. These neighborhoods — South Bronx, East Harlem, Brownsville — score at the top of [NYC's Heat Vulnerability Index](https://a816-dohbesp.nyc.gov/IndicatorPublic/data-features/hvi/) due to limited green space, low air conditioning prevalence, and concentrated poverty. Demonstrates how overburdened communities run significantly hotter than the city average, and the value of percentile context over absolute thresholds.
 
 **Suggested queries:**
@@ -255,6 +256,7 @@ The highest-heat day in the dataset. Average heat_index_risk of 96.7 across the 
 ---
 
 ### Scenario 2: Post-storm transit disruption — city-wide (2021-09-02)
+
 Hurricane Ida aftermath — the highest combined-stress day in the entire dataset. Average transit delay index of 91.1 city-wide, with outer Brooklyn and Queens CDs hit hardest. Hospital capacity also elevated (avg 81%) from storm-related ED surge. Demonstrates `get_fastest_accelerating` and `compare_to_historical_analogs`.
 
 **Suggested queries:**
@@ -265,6 +267,7 @@ Hurricane Ida aftermath — the highest combined-stress day in the entire datase
 ---
 
 ### Scenario 3: Winter hospital strain — outer boroughs (2022-01-13)
+
 COVID Omicron wave peak — the highest hospital strain day in the dataset. Average total_capacity_pct of 97.5% city-wide, with many CDs at or near 100%. Outer-borough CDs served by community hospitals (e.g. Lincoln in the Bronx, Elmhurst in Queens) are most affected. Demonstrates `get_top_risk_cds` filtered by hospital factor and multi-year trend analysis.
 
 **Suggested queries:**
@@ -281,6 +284,8 @@ See [`CODEBOOK.md`](CODEBOOK.md) for the full dataset codebook, including schema
 **Coverage:** 59 NYC Community Districts · Daily · 2020-01-01 to 2026-03-06 · ~133,000 rows per table
 
 **Tables:** `community_districts`, `heat_index`, `hospital_capacity`, `transit_delays`
+
+**CSV files** are in `data/` and can be loaded directly into any PostgreSQL instance using `\copy` (see Setup above).
 
 ---
 

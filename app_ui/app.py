@@ -1497,6 +1497,25 @@ def server(input, output, session):
     def _on_layer_change():
         applied_layer.set(input.risk_layer())
 
+    # ---- Date change (immediate — no Search required) ------------------------
+
+    @reactive.effect
+    def _on_date_change():
+        m_name  = input.sel_month()
+        year_in = input.sel_year()
+        day_in  = input.sel_day()
+        if not m_name or year_in is None or day_in is None:
+            return
+        try:
+            m = _MNAMES.index(m_name) + 1
+            y = int(year_in)
+            d = max(1, min(int(day_in), calendar.monthrange(y, m)[1]))
+            dt = pd.Timestamp(year=y, month=m, day=d).date()
+            dt = max(DATE_MIN, min(DATE_MAX, dt))
+            applied_date.set(dt)
+        except Exception:
+            return
+
     # ---- Search (type-ahead selectize — auto-selects on pick) ----------------
 
     @reactive.effect
