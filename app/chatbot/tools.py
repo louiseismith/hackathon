@@ -188,15 +188,19 @@ def get_cd_snapshot(cd_id: str, date_str: str) -> dict:
             "heat_index_risk_p50":        baseline["heat_index_risk_p50"],
             "heat_index_risk_p90":        baseline["heat_index_risk_p90"],
             "heat_index_risk_percentile": baseline.get("heat_index_risk_percentile"),
+            "heat_index_risk_level":      _percentile_label(baseline.get("heat_index_risk_percentile")),
             "total_capacity_pct_p50":        baseline["total_capacity_pct_p50"],
             "total_capacity_pct_p90":        baseline["total_capacity_pct_p90"],
             "total_capacity_pct_percentile": baseline.get("total_capacity_pct_percentile"),
+            "total_capacity_pct_level":      _percentile_label(baseline.get("total_capacity_pct_percentile")),
             "transit_delay_index_p50":        baseline["transit_delay_index_p50"],
             "transit_delay_index_p90":        baseline["transit_delay_index_p90"],
             "transit_delay_index_percentile": baseline.get("transit_delay_index_percentile"),
+            "transit_delay_index_level":      _percentile_label(baseline.get("transit_delay_index_percentile")),
             "ed_wait_time_hours_p50":        baseline["ed_wait_hours_p50"],
             "ed_wait_time_hours_p90":        baseline["ed_wait_hours_p90"],
             "ed_wait_time_hours_percentile": baseline.get("ed_wait_hours_percentile"),
+            "ed_wait_time_hours_level":      _percentile_label(baseline.get("ed_wait_hours_percentile")),
         }
 
     return snapshot

@@ -153,7 +153,8 @@ def run_cd_summary(cd_id: str, date: str, return_history: bool = False):
         f"Give a concise risk summary for community district {cd_id} as of {date}. "
         f"Call get_cd_snapshot first. Then in 2-3 sentences: state the current heat, hospital, and transit "
         f"risk levels; highlight what is most concerning; and indicate whether conditions are typical or "
-        f"unusual for this time of year based on the monthly context. Be factual. Do not list recommendations."
+        f"unusual for this time of year. Use the *_level fields in monthly_context (e.g. heat_index_risk_level) "
+        f"for plain-language descriptions — do not re-interpret the raw percentile numbers. Be factual. Do not list recommendations."
     )
     result = agent.run_sync(message)
     text = result.output or "Unable to generate summary."
@@ -194,8 +195,8 @@ def run_cd_recommendations(cd_id: str, date: str, return_history: bool = False):
         f"- Use judgment on absolute values: if heat_index_risk is below 10, do not flag it as a "
         f"heat signal regardless of its percentile — very low absolute values are not actionable. "
         f"Similarly, do not flag a metric if its absolute value is clearly in the safe range.\n"
-        f"- Never quote percentile numbers. Translate into plain language: "
-        f"above 90th = 'among the highest on record', 75–90th = 'above typical', below 75th = 'typical'.\n"
+        f"- Use the *_level fields in monthly_context (e.g. transit_delay_index_level) for plain-language "
+        f"descriptions — do not re-interpret the raw percentile numbers yourself.\n"
         f"- If all signals are typical, say so in one sentence and stop.\n"
         f"- When flagging something, name the relevant domain specifically "
         f"(hospital capacity, transit operations, emergency management) — not 'relevant stakeholders'.\n"
