@@ -622,6 +622,7 @@ html, body {
 }
 
 /* Sidebar: no scrollbar; only chat area scrolls */
+.bslib-sidebar-panel,
 .bslib-sidebar-layout > .bslib-sidebar-panel {
     background: radial-gradient(circle at 0% 0%, #ffffff 0, #f8fafc 35%, #f1f5f9 75%, #e2e8f0 100%) !important;
     border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
@@ -635,11 +636,17 @@ html, body {
     padding: 12px 16px 0 16px !important;
     display: flex !important;
     flex-direction: column !important;
+    --bslib-sidebar-gap: 0px;
     gap: 0 !important;
     flex: 1 !important;
     min-height: 0 !important;
     height: 100% !important;
     overflow: hidden !important;
+}
+/* Zero out any margins bslib might add to sidebar children */
+.bslib-sidebar-panel .sidebar-content > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
 }
 .bslib-sidebar-panel .tab-content,
 .bslib-sidebar-panel .nav-content,
@@ -650,7 +657,10 @@ html, body {
     min-height: 0 !important;
     overflow: hidden !important;
 }
-.bslib-sidebar-panel .tab-pane {
+.bslib-sidebar-panel .tab-pane:not(.active) {
+    display: none !important;
+}
+.bslib-sidebar-panel .tab-pane.active {
     display: flex !important;
     flex-direction: column !important;
     flex: 1 !important;
@@ -658,53 +668,83 @@ html, body {
     overflow: hidden !important;
 }
 
-/* Chat panel: outer is a bounded flex column; only the messages area scrolls */
+/* Chat panel: outer is a flex column; messages area has explicit height */
 .chat-panel-outer {
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
     display: flex;
     flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
 }
 .chat-panel-prompts {
     flex-shrink: 0;
     background: transparent !important;
-    padding-bottom: 4px;
 }
-/* Sidebar prompt buttons — smaller, no white background */
-.chat-panel-prompts .btn {
-    font-size: 10px !important;
-    padding: 4px 8px !important;
+.chat-panel-prompts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.chat-panel-prompts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px;
+}
+/* Sidebar prompt buttons — compact 2-col grid */
+.chat-panel-prompts .btn-outline-primary {
+    font-size: 9px !important;
+    padding: 3px 6px !important;
     line-height: 1.3 !important;
     background: transparent !important;
-    border-color: rgba(37,99,235,0.5) !important;
+    border-color: rgba(37,99,235,0.4) !important;
+    color: #2563eb !important;
+    text-align: left !important;
+    white-space: normal !important;
+    width: 100% !important;
 }
-.chat-panel-prompts .btn-outline-secondary {
-    border-color: rgba(100,116,139,0.5) !important;
+.chat-panel-prompts .btn-outline-primary:hover {
+    background: rgba(37,99,235,0.06) !important;
 }
-.chat-panel-prompts .btn-sm { font-size: 10px !important; }
+/* Messages card — explicit height so it fills available space
+   regardless of bslib flex chain: 100vh minus header/gap/tabs/prompts/input */
 .chat-panel-messages-scroll {
-    flex: 1;
-    min-height: 0;
+    height: calc(100vh - 420px);
+    min-height: 150px;
     overflow-y: auto;
     overflow-x: hidden;
+    background: rgba(248,250,252,0.7);
+    border: 1px solid rgba(226,232,240,0.9);
+    border-radius: 6px;
+    padding: 8px 8px 12px 8px;
 }
 .chat-panel-messages {
-    padding: 4px 0;
+    padding: 0;
 }
+/* Inline input row */
 .chat-panel-input {
     flex-shrink: 0;
-    padding: 8px 0 0 0;
-    margin-top: 6px;
-    border-top: 1px solid rgba(0,0,0,0.08);
     background: transparent !important;
 }
-.chat-panel-input .btn { font-size: 10px !important; padding: 4px 10px !important; }
+.chat-panel-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+}
+.chat-panel-input-row .form-group { flex: 1; margin: 0 !important; }
+.chat-panel-input-row input { font-size: 11px !important; }
+.chat-panel-input .btn-primary {
+    font-size: 10px !important;
+    padding: 6px 14px !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
 
 /* Sidebar nav tabs: underline affordance, blue (#2563eb) when active — compact */
 .bslib-sidebar-panel .nav-tabs,
 .bslib-sidebar-panel .nav-underline {
     border-bottom: 1px solid #e2e8f0;
+    flex-shrink: 0 !important;
+    margin-top: 0 !important;
 }
 .bslib-sidebar-panel .nav-tabs .nav-link,
 .bslib-sidebar-panel .nav-underline .nav-link {
@@ -1124,35 +1164,33 @@ app_ui = ui.page_fillable(
                     "Chatbot",
                     ui.div(
                         ui.div(
-                            ui.p("Suggested prompts",
-                                 style="font-size:10px;color:#64748b;margin:0px 0 4px;"),
-                            ui.input_action_button(
-                                "prompt1", "Which neighborhoods show rising heat and hospital strain?",
-                                class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                                style="text-align:left;white-space:normal;"),
-                            ui.input_action_button(
-                                "prompt2", "Where is risk accelerating the fastest?",
-                                class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                                style="text-align:left;white-space:normal;"),
-                            ui.input_action_button(
-                                "prompt3", "How does today compare to similar historical patterns?",
-                                class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                                style="text-align:left;white-space:normal;"),
-                            ui.input_action_button(
-                                "prompt4", "Is summer heat risk getting worse year over year?",
-                                class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                                style="text-align:left;white-space:normal;"),
-                            ui.input_action_button(
-                                "prompt5", "How has hospital capacity changed since 2020?",
-                                class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                                style="text-align:left;white-space:normal;"),
-                            ui.hr(),
+                            ui.div(
+                                ui.p("Suggested prompts",
+                                     style="font-size:10px;color:#64748b;margin:0;font-weight:500;"),
+                                ui.input_action_button(
+                                    "clear_chat", "Clear",
+                                    class_="btn btn-link btn-sm",
+                                    style="font-size:9px;padding:0;color:#94a3b8;text-decoration:none;"),
+                                class_="chat-panel-prompts-header",
+                            ),
                             ui.div(
                                 ui.input_action_button(
-                                    "clear_chat", "Clear chat",
-                                    class_="btn btn-outline-secondary btn-sm",
-                                    style="font-size:10px;padding:2px 8px;"),
-                                style="text-align:right;margin-bottom:4px;"),
+                                    "prompt1", "Which neighborhoods show rising heat and hospital strain?",
+                                    class_="btn btn-outline-primary btn-sm"),
+                                ui.input_action_button(
+                                    "prompt2", "Where is risk accelerating the fastest?",
+                                    class_="btn btn-outline-primary btn-sm"),
+                                ui.input_action_button(
+                                    "prompt3", "How does today compare to similar historical patterns?",
+                                    class_="btn btn-outline-primary btn-sm"),
+                                ui.input_action_button(
+                                    "prompt4", "Is summer heat risk getting worse year over year?",
+                                    class_="btn btn-outline-primary btn-sm"),
+                                ui.input_action_button(
+                                    "prompt5", "How has hospital capacity changed since 2020?",
+                                    class_="btn btn-outline-primary btn-sm"),
+                                class_="chat-panel-prompts-grid",
+                            ),
                             class_="chat-panel-prompts",
                         ),
                         ui.div(
@@ -1160,12 +1198,15 @@ app_ui = ui.page_fillable(
                             class_="chat-panel-messages-scroll",
                         ),
                         ui.div(
-                            ui.input_text(
-                                "chat_input", None,
-                                placeholder="Type your question here...", width="100%"),
-                            ui.input_action_button(
-                                "chat_send", "Send",
-                                class_="btn btn-primary btn-sm w-100 mt-1"),
+                            ui.div(
+                                ui.input_text(
+                                    "chat_input", None,
+                                    placeholder="Type your question here...", width="100%"),
+                                ui.input_action_button(
+                                    "chat_send", "Send",
+                                    class_="btn btn-primary btn-sm"),
+                                class_="chat-panel-input-row",
+                            ),
                             class_="chat-panel-input",
                         ),
                         class_="chat-panel-outer",
