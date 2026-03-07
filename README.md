@@ -2,6 +2,8 @@
 
 A cloud-based AI decision-support tool for the NYC Department of Emergency Management. Stores and analyzes neighborhood-level time-series data across heat, hospital capacity, and transit — and surfaces AI-generated risk summaries for decision-makers.
 
+**Live app:** https://connect.systems-apps.com/nyc_risk/
+
 ---
 
 ## Table of contents
@@ -203,7 +205,7 @@ COVID Omicron wave peak — the highest hospital strain day in the dataset. Aver
 
 ## Data
 
-See [`CODEBOOK.md`](CODEBOOK.md) for the full dataset codebook, including schema, variable definitions, modeling assumptions, real-world data source equivalents, and the synthetic trends built into each dataset.
+All data is synthetically generated to model real-world patterns. See [`CODEBOOK.md`](CODEBOOK.md) for the full dataset codebook, including schema, variable definitions, modeling assumptions, real-world data source equivalents, and the synthetic trends built into each dataset. See [`data/DATA_GENERATION.md`](data/DATA_GENERATION.md) for the full generation methodology.
 
 **Coverage:** 59 NYC Community Districts · Daily · 2020-01-01 to 2026-03-06 · ~133,000 rows per table
 
