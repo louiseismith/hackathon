@@ -209,6 +209,7 @@ def _build_folium_map(boundaries, risk_by_cd, layer_label):
         zoom_start=11,
         tiles="CartoDB positron",
         prefer_canvas=True,
+        zoom_control=False,
     )
     gj = copy.deepcopy(boundaries)
     for feat in gj["features"]:
@@ -247,30 +248,30 @@ def _build_folium_map(boundaries, risk_by_cd, layer_label):
 # ---------------------------------------------------------------------------
 
 _CARD_CSS = (
-    "border-radius:12px;"
-    "background:rgba(255,255,255,0.52);"
+    "border-radius:8px;"
+    "background:rgba(255,255,255,0.42);"
     "backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);"
-    "box-shadow:0 2px 16px rgba(0,0,0,0.10);"
-    "padding:14px 16px;"
-    "font-family:system-ui,-apple-system,sans-serif;font-size:14px;"
+    "box-shadow:0 2px 10px rgba(0,0,0,0.08);"
+    "padding:8px 10px;"
+    "font-family:system-ui,-apple-system,sans-serif;font-size:11px;"
     "border:1px solid rgba(255,255,255,0.38);"
-    "min-width:240px;max-width:300px;"
+    "min-width:160px;max-width:200px;width:200px;"
 )
 
 _OVERLAY_CSS = (
-    "border-radius:10px;"
-    "background:rgba(255,255,255,0.52);"
+    "border-radius:8px;"
+    "background:rgba(255,255,255,0.42);"
     "backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);"
-    "box-shadow:0 2px 12px rgba(0,0,0,0.08);"
-    "padding:12px 14px;"
-    "font-family:system-ui,-apple-system,sans-serif;font-size:13px;"
+    "box-shadow:0 2px 8px rgba(0,0,0,0.07);"
+    "padding:6px 8px;"
+    "font-family:system-ui,-apple-system,sans-serif;font-size:11px;"
     "border:1px solid rgba(255,255,255,0.38);"
 )
 
 
 def _trend_arrow(curr, prev, tol=0.1):
     """Return (symbol, color) comparing curr vs prev value over 30 days.
-    Green ▲ = increased, Red ▼ = decreased, Yellow → = no change."""
+    Red ▲ = increased (bad for risk metrics), Green ▼ = decreased (good), Yellow → = no change."""
     if curr is None or prev is None:
         return "→", "#94a3b8"
     try:
@@ -278,9 +279,9 @@ def _trend_arrow(curr, prev, tol=0.1):
     except (TypeError, ValueError):
         return "→", "#94a3b8"
     if delta > tol:
-        return "▲", "#22c55e"   # green — increased
+        return "▲", "#e74c3c"   # red — increased (bad)
     if delta < -tol:
-        return "▼", "#e74c3c"   # red — decreased
+        return "▼", "#22c55e"   # green — decreased (good)
     return "→", "#f59e0b"       # yellow — no change
 
 
@@ -288,26 +289,25 @@ def _stats_card_html(sc, risk_df, prev_df=None):
     if not sc:
         return (
             f'<div style="{_CARD_CSS}">'
-            '<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;">Statistics</div>'
-            '<div style="font-size:13px;color:#64748b;">Select a district on the map or use search.</div>'
+            '<div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px;">Statistics</div>'
+            '<div style="font-size:10px;color:#64748b;">Select a district on the map or use search.</div>'
             '</div>'
         )
 
     name  = _esc(sc.get("neighborhood") or sc.get("cd_id") or "—")
-    sub   = _esc(" | ".join(filter(None, [sc.get("borough", ""), sc.get("cd_id", "")])))
     cd_id = sc.get("cd_id", "")
 
     header = (
-        f'<div style="margin-bottom:4px;">'
-        f'  <div style="font-size:20px;font-weight:700;color:#0f172a;">{name}</div>'
-        f'  <div style="font-size:12px;color:#64748b;margin-top:2px;">{sub}</div>'
+        f'<div style="margin-bottom:2px;">'
+        f'  <div style="font-size:13px;font-weight:700;color:#0f172a;">{name}</div>'
+        f'  <div style="font-size:10px;color:#64748b;margin-top:1px;">{_esc(cd_id)}</div>'
         f'</div>'
     )
 
     if risk_df is None or risk_df.empty:
         return (
             f'<div style="{_CARD_CSS}">{header}'
-            f'<div style="margin-top:10px;font-size:12px;color:#64748b;">No data for this district.</div>'
+            f'<div style="margin-top:6px;font-size:10px;color:#64748b;">No data for this district.</div>'
             f'</div>'
         )
 
@@ -315,7 +315,7 @@ def _stats_card_html(sc, risk_df, prev_df=None):
     if row.empty:
         return (
             f'<div style="{_CARD_CSS}">{header}'
-            f'<div style="margin-top:10px;font-size:12px;color:#64748b;">No data for this district.</div>'
+            f'<div style="margin-top:6px;font-size:10px;color:#64748b;">No data for this district.</div>'
             f'</div>'
         )
 
@@ -360,11 +360,11 @@ def _stats_card_html(sc, risk_df, prev_df=None):
         prev_val = prev_r.get(col) if prev_r is not None else None
         arrow, ac = _trend_arrow(val, prev_val)
         rows_html += (
-            f'<div style="display:flex;align-items:center;gap:8px;margin-top:9px;">'
-            f'  <span style="width:8px;height:8px;border-radius:50%;background:{dot};flex-shrink:0;"></span>'
-            f'  <span style="flex:1;color:#334155;">{_esc(label)}</span>'
-            f'  <span style="font-weight:500;color:#0f172a;">{_esc(vfmt)}</span>'
-            f'  <span style="font-size:11px;color:{ac};font-weight:600;">{arrow}</span>'
+            f'<div style="display:flex;align-items:center;gap:4px;margin-top:4px;">'
+            f'  <span style="width:5px;height:5px;border-radius:50%;background:{dot};flex-shrink:0;"></span>'
+            f'  <span style="flex:1;color:#334155;font-size:10px;">{_esc(label)}</span>'
+            f'  <span style="font-weight:500;color:#0f172a;font-size:10px;">{_esc(vfmt)}</span>'
+            f'  <span style="font-size:9px;color:{ac};font-weight:600;">{arrow}</span>'
             f'</div>'
         )
 
@@ -372,12 +372,12 @@ def _stats_card_html(sc, risk_df, prev_df=None):
     comp_fmt              = f"{composite_val} / 100" if composite_val is not None else "—"
     comp_arrow, comp_ac   = _trend_arrow(composite_val, prev_composite, tol=0.5)
     comp_row = (
-        f'<div style="border-top:1px solid rgba(0,0,0,0.08);margin-top:12px;padding-top:10px;">'
-        f'  <div style="display:flex;align-items:center;gap:8px;">'
-        f'    <span style="width:8px;height:8px;border-radius:50%;background:{comp_dot};flex-shrink:0;"></span>'
-        f'    <span style="flex:1;font-weight:600;color:#0f172a;">Composite Risk Score</span>'
-        f'    <span style="font-weight:600;color:#0f172a;">{_esc(comp_fmt)}</span>'
-        f'    <span style="font-size:11px;color:{comp_ac};font-weight:600;">{comp_arrow}</span>'
+        f'<div style="border-top:1px solid rgba(0,0,0,0.08);margin-top:6px;padding-top:6px;">'
+        f'  <div style="display:flex;align-items:center;gap:4px;">'
+        f'    <span style="width:5px;height:5px;border-radius:50%;background:{comp_dot};flex-shrink:0;"></span>'
+        f'    <span style="flex:1;font-weight:600;color:#0f172a;font-size:10px;">Composite Risk Score</span>'
+        f'    <span style="font-weight:600;color:#0f172a;font-size:10px;">{_esc(comp_fmt)}</span>'
+        f'    <span style="font-size:9px;color:{comp_ac};font-weight:600;">{comp_arrow}</span>'
         f'  </div>'
         f'</div>'
     )
@@ -385,45 +385,55 @@ def _stats_card_html(sc, risk_df, prev_df=None):
     return (
         f'<div style="{_CARD_CSS}">'
         f'{header}'
-        f'<div style="margin-top:10px;">{rows_html}{comp_row}</div>'
+        f'<div style="margin-top:6px;">{rows_html}{comp_row}</div>'
         f'</div>'
     )
 
 
 def _top_risk_html(risk_df, layer_info):
-    hdr = '<div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Top Communities At Risk</div>'
-    if risk_df is None or risk_df.empty or "display_val" not in risk_df.columns:
-        return (
-            f'<div style="{_OVERLAY_CSS}">{hdr}'
-            f'<div style="color:#64748b;font-size:12px;">No data.</div></div>'
-        )
-
-    top  = risk_df.nlargest(5, "display_val")
+    hdr = '<div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">Top Communities At Risk</div>'
     unit = layer_info.get("unit", "")
     metric_lbl = layer_info["label"]
+
     rows = ""
-    for _, r in top.iterrows():
-        name = _esc((r.get("neighborhood") or "") + "  " + (r.get("cd_id") or ""))
-        val  = r.get("display_val")
-        vstr = f"{round(float(val), 1)}{unit}" if pd.notna(val) else "—"
-        dot  = _dot_color(float(val) if pd.notna(val) else None)
-        rows += (
-            f'<tr>'
-            f'<td style="padding:4px 6px;">'
-            f'  <span style="width:7px;height:7px;border-radius:50%;background:{dot};'
-            f'  display:inline-block;margin-right:5px;vertical-align:middle;"></span>'
-            f'  {name}</td>'
-            f'<td style="padding:4px 6px;font-weight:500;text-align:right;">{_esc(vstr)}</td>'
-            f'</tr>'
-        )
+    if risk_df is None or risk_df.empty or "display_val" not in risk_df.columns:
+        # Render placeholder rows so the card layout / height
+        # matches the populated state before the user clicks anything.
+        for _ in range(5):
+            rows += (
+                f'<tr>'
+                f'<td style="padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;">'
+                f'  <span style="width:5px;height:5px;border-radius:50%;background:#94a3b8;'
+                f'  display:inline-block;margin-right:3px;vertical-align:middle;"></span>'
+                f'  —</td>'
+                f'<td style="padding:2px 4px;font-weight:500;text-align:right;white-space:nowrap;color:#94a3b8;font-size:10px;">—</td>'
+                f'</tr>'
+            )
+    else:
+        top = risk_df.nlargest(5, "display_val")
+        for _, r in top.iterrows():
+            name = _esc((r.get("neighborhood") or "") + "  " + (r.get("cd_id") or ""))
+            val  = r.get("display_val")
+            vstr = f"{round(float(val), 1)}{unit}" if pd.notna(val) else "—"
+            dot  = _dot_color(float(val) if pd.notna(val) else None)
+            rows += (
+                f'<tr>'
+                f'<td style="padding:2px 4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:10px;">'
+                f'  <span style="width:5px;height:5px;border-radius:50%;background:{dot};'
+                f'  display:inline-block;margin-right:3px;vertical-align:middle;"></span>'
+                f'  {name}</td>'
+                f'<td style="padding:2px 4px;font-weight:500;text-align:right;white-space:nowrap;font-size:10px;">{_esc(vstr)}</td>'
+                f'</tr>'
+            )
 
     return (
-        f'<div style="{_OVERLAY_CSS}">'
+        f'<div class="top-risk-card" '
+        f'style="{_OVERLAY_CSS}overflow:hidden;display:flex;flex-direction:column;min-width:0;">'
         f'{hdr}'
-        f'<table style="width:100%;border-collapse:collapse;">'
+        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed;">'
         f'<thead><tr style="border-bottom:1px solid #e2e8f0;">'
-        f'  <th style="text-align:left;padding:4px 6px;font-weight:600;color:#475569;font-size:12px;">Name</th>'
-        f'  <th style="text-align:right;padding:4px 6px;font-weight:600;color:#475569;font-size:12px;">{_esc(metric_lbl)}</th>'
+        f'  <th style="text-align:left;padding:2px 4px;font-weight:600;color:#475569;font-size:10px;white-space:nowrap;">Name</th>'
+        f'  <th style="text-align:right;padding:2px 4px;font-weight:600;color:#475569;font-size:10px;white-space:nowrap;">{_esc(metric_lbl)}</th>'
         f'</tr></thead>'
         f'<tbody>{rows}</tbody>'
         f'</table></div>'
@@ -432,31 +442,35 @@ def _top_risk_html(risk_df, layer_info):
 
 def _trend_html(sc, risk_layer, layer_info, date_str, trend_days=30):
     hdr = (
-        f'<div style="font-weight:700;color:#0f172a;margin-bottom:6px;">'
+        f'<div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">'
         f'Trend '
-        f'<span style="font-weight:400;color:#64748b;font-size:11px;">(Past {trend_days} days)</span>'
+        f'<span style="font-weight:400;color:#64748b;font-size:9px;">(Past {trend_days} days)</span>'
         f'</div>'
     )
     if not sc or not sc.get("cd_id"):
         return (
             f'<div style="{_OVERLAY_CSS}">{hdr}'
-            f'<div style="color:#64748b;font-size:12px;">Select a district to see trend.</div></div>'
+            f'<div style="color:#64748b;font-size:10px;">Select a district to see trend.</div></div>'
         )
 
     start_d = (pd.Timestamp(date_str) - pd.Timedelta(days=int(trend_days) - 1)).strftime("%Y-%m-%d")
     try:
         series = get_risk_series(sc["cd_id"], start_d, date_str)
     except Exception:
-        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">Trend unavailable.</div></div>'
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:10px;">Trend unavailable.</div></div>'
     if not series:
-        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">No data for this range.</div></div>'
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:10px;">No data for this range.</div></div>'
 
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
+        import matplotlib.dates as mdates
+        from matplotlib.ticker import FuncFormatter
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = ["Segoe UI", "DejaVu Sans", "sans-serif"]
     except ModuleNotFoundError:
-        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">Install matplotlib for trend chart.</div></div>'
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:10px;">Install matplotlib for trend chart.</div></div>'
 
     sdf = pd.DataFrame(series)
     if risk_layer == "composite":
@@ -467,16 +481,61 @@ def _trend_html(sc, risk_layer, layer_info, date_str, trend_days=30):
         sdf["display_val"] = sdf[layer_info["col"]]
     sdf["date"] = pd.to_datetime(sdf["date"])
 
-    fig, ax = plt.subplots(figsize=(3.0, 1.6), dpi=100)
-    ax.plot(sdf["date"], sdf["display_val"], color="#e74c3c", linewidth=1.5)
-    ax.fill_between(sdf["date"], sdf["display_val"], alpha=0.12, color="#e74c3c")
-    ax.tick_params(labelsize=8)
-    ax.set_xlabel("")
-    ax.set_ylabel(layer_info["label"], fontsize=8)
-    fig.autofmt_xdate()
-    plt.tight_layout(pad=0.4)
+    # Modern chart style — higher dpi for crisp rendering when scaled
+    fig, ax = plt.subplots(figsize=(1.8, 1.0), dpi=150)
+    fig.patch.set_facecolor("none")
+    ax.set_facecolor("none")
+
+    line_color = "#0d0887"  # Legend deep purple
+    fill_color = "#7e03a8"  # Legend purple
+    dates = sdf["date"]
+    vals = sdf["display_val"].astype(float)
+
+    # Y-axis limits: keep line centered for flat series and avoid negative labels
+    vmin = float(np.nanmin(vals))
+    vmax = float(np.nanmax(vals))
+    if np.isfinite(vmin) and np.isfinite(vmax):
+        if vmax == vmin:
+            # Flat series (e.g., winter heat = 0) — create a small band around value
+            margin = 0.05 * (abs(vmax) if vmax != 0 else 1.0)
+        else:
+            margin = 0.10 * (vmax - vmin)
+        y_min = vmin - margin
+        y_max = vmax + margin
+        # If everything is at or below zero, keep a symmetric band around zero
+        if vmax <= 0:
+            y_min = -abs(margin)
+            y_max = abs(margin)
+    else:
+        y_min, y_max = 0.0, 1.0
+
+    baseline = y_min
+
+    ax.fill_between(dates, baseline, vals, alpha=0.15, color=fill_color)
+    ax.plot(dates, vals, color=line_color, linewidth=2.2, solid_capstyle="round", solid_joinstyle="round")
+
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["left"].set_color("#e2e8f0")
+    ax.spines["bottom"].set_color("#e2e8f0")
+    ax.tick_params(axis="both", labelsize=5, colors="#64748b")
+    ax.set_xlabel("", fontsize=6, color="#64748b")
+    ax.set_ylabel(layer_info["label"], fontsize=6, color="#64748b", fontweight=400)
+
+    # Apply y-limits and hide negative tick labels
+    ax.set_ylim(y_min, y_max)
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda y, pos: "" if y < 0 else f"{y:g}"))
+
+    # Short, user-friendly dates without leading zeros, using slash (e.g., 2/27)
+    if sys.platform.startswith("win"):
+        date_fmt = "%#m/%#d"
+    else:
+        date_fmt = "%-m/%-d"
+    ax.xaxis.set_major_formatter(mdates.DateFormatter(date_fmt))
+    fig.autofmt_xdate(rotation=45, ha="right")
+    plt.tight_layout(pad=0.5)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=(1, 1, 1, 0))
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor="none", edgecolor="none")
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode()
@@ -503,44 +562,62 @@ def _legend_html(layer_info):
     hi_lbl = fmt(hi)
 
     css = (
-        "border-radius:10px;"
+        "border-radius:6px;"
         "background:rgba(255,255,255,0.52);"
         "backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);"
-        "box-shadow:0 2px 12px rgba(0,0,0,0.08);"
-        "padding:10px 13px;"
+        "box-shadow:0 2px 8px rgba(0,0,0,0.08);"
+        "padding:5px 8px;"
         "font-family:system-ui,-apple-system,sans-serif;"
         "border:1px solid rgba(255,255,255,0.38);"
-        "min-width:160px;"
+        "min-width:110px;"
     )
     return (
         f'<div style="{css}">'
-        f'<div style="font-weight:700;font-size:12px;color:#0f172a;margin-bottom:6px;">{_esc(label)}</div>'
-        f'<div style="height:10px;border-radius:5px;'
+        f'<div style="font-weight:700;font-size:9px;color:#0f172a;margin-bottom:3px;">{_esc(label)}</div>'
+        f'<div style="height:6px;border-radius:3px;'
         f'background:linear-gradient(to right,#0d0887,#7e03a8,#cc4778,#f89441,#f0f921);"></div>'
-        f'<div style="display:flex;justify-content:space-between;margin-top:3px;">'
-        f'  <span style="font-size:11px;color:#64748b;">{_esc(lo_lbl)}</span>'
-        f'  <span style="font-size:11px;color:#64748b;">{_esc(hi_lbl)}</span>'
+        f'<div style="display:flex;justify-content:space-between;margin-top:2px;">'
+        f'  <span style="font-size:9px;color:#64748b;">{_esc(lo_lbl)}</span>'
+        f'  <span style="font-size:9px;color:#64748b;">{_esc(hi_lbl)}</span>'
         f'</div>'
         f'</div>'
     )
 
 
 # ---------------------------------------------------------------------------
+# Prompt button inline style — override Bootstrap 5 CSS variables + direct properties
+_PROMPT_BTN_STYLE = (
+    "--bs-btn-bg:#0d0887;--bs-btn-color:white;--bs-btn-border-color:transparent;"
+    "--bs-btn-hover-bg:#7e03a8;--bs-btn-hover-color:white;"
+    "--bs-btn-active-bg:#7e03a8;--bs-btn-active-color:white;"
+    "background-color:#0d0887;color:white;border:none;border-radius:6px;"
+    "font-size:9px;padding:4px 8px;line-height:1.3;text-align:left;"
+    "white-space:normal;width:100%;cursor:pointer;"
+    "box-shadow:0 1px 3px rgba(13,8,135,0.25);"
+)
+
 # App CSS
 # ---------------------------------------------------------------------------
 
 APP_CSS = """
-html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; overflow: hidden; }
+html, body {
+    font-family: system-ui, -apple-system, sans-serif;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background: radial-gradient(circle at 0% 0%, #ffffff 0, #f8fafc 35%, #f1f5f9 75%, #e2e8f0 100%);
+}
 
 /* Remove all bslib padding so map can be truly full-bleed */
 .bslib-page-fill {
-    background: linear-gradient(160deg, #f0f4f8 0%, #e2e8f0 100%) !important;
+    background: radial-gradient(circle at 0% 0%, #ffffff 0, #f8fafc 35%, #f1f5f9 75%, #e2e8f0 100%) !important;
     padding: 0 !important;
     height: 100vh !important;
     overflow: hidden !important;
 }
 .bslib-sidebar-layout {
     height: 100vh !important;
+    overflow: hidden !important;
 }
 .bslib-sidebar-layout > .bslib-main {
     padding: 0 !important;
@@ -555,13 +632,168 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     max-height: 100vh !important;
 }
 
-/* Sidebar */
+/* Sidebar: no scrollbar; only chat area scrolls */
+.bslib-sidebar-panel,
 .bslib-sidebar-layout > .bslib-sidebar-panel {
-    background: rgba(255, 255, 255, 0.92) !important;
+    background: radial-gradient(circle at 0% 0%, #ffffff 0, #f8fafc 35%, #f1f5f9 75%, #e2e8f0 100%) !important;
     border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
+    max-width: 50vw !important;
+    min-width: 420px !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+}
+.bslib-sidebar-panel .sidebar-content,
+.bslib-sidebar-layout > .bslib-sidebar-panel > .sidebar-content {
+    padding: 12px 16px 0 16px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    --bslib-sidebar-gap: 0px;
+    gap: 0 !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    overflow: hidden !important;
+}
+/* Zero out any margins bslib might add to sidebar children */
+.bslib-sidebar-panel .sidebar-content > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+}
+.bslib-sidebar-panel .tab-content,
+.bslib-sidebar-panel .nav-content,
+.bslib-sidebar-panel [role="tabpanel"] {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+}
+.bslib-sidebar-panel .tab-pane:not(.active) {
+    display: none !important;
+}
+.bslib-sidebar-panel .tab-pane.active {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
 }
 
-/* Map container: fills viewport, slight inset so bottom edge is never clipped */
+/* Chat panel: outer is a flex column; messages area has explicit height */
+.chat-panel-outer {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 4px;
+}
+.chat-panel-prompts {
+    flex-shrink: 0;
+    background: transparent !important;
+}
+.chat-panel-prompts-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+.chat-panel-prompts-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px;
+}
+/* Sidebar prompt buttons — match Search button style */
+.prompt-btn,
+button#prompt1, button#prompt2, button#prompt3, button#prompt4, button#prompt5 {
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    font-size: 9px !important;
+    padding: 4px 8px !important;
+    line-height: 1.3 !important;
+    background-color: #0d0887 !important;
+    background: #0d0887 !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px !important;
+    box-shadow: 0 1px 3px rgba(13,8,135,0.25) !important;
+    text-align: left !important;
+    white-space: normal !important;
+    width: 100% !important;
+    cursor: pointer !important;
+    display: block !important;
+}
+.prompt-btn:hover,
+button#prompt1:hover, button#prompt2:hover, button#prompt3:hover,
+button#prompt4:hover, button#prompt5:hover {
+    background-color: #7e03a8 !important;
+    background: #7e03a8 !important;
+    color: white !important;
+}
+/* Messages card — explicit height so it fills available space
+   regardless of bslib flex chain: 100vh minus header/gap/tabs/prompts/input */
+.chat-panel-messages-scroll {
+    height: calc(100vh - 420px);
+    min-height: 150px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    background: rgba(248,250,252,0.7);
+    border: 1px solid rgba(226,232,240,0.9);
+    border-radius: 6px;
+    padding: 8px 8px 12px 8px;
+}
+.chat-panel-messages {
+    padding: 0;
+}
+/* Inline input row */
+.chat-panel-input {
+    flex-shrink: 0;
+    background: transparent !important;
+}
+.chat-panel-input-row {
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+}
+.chat-panel-input-row .form-group { flex: 1; margin: 0 !important; }
+.chat-panel-input-row input { font-size: 11px !important; }
+.chat-panel-input .btn-primary {
+    font-size: 10px !important;
+    padding: 6px 14px !important;
+    background-color: #0d0887 !important;
+    background: #0d0887 !important;
+    border-color: #0d0887 !important;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Sidebar nav tabs: underline affordance, blue (#2563eb) when active — compact */
+.bslib-sidebar-panel .nav-tabs,
+.bslib-sidebar-panel .nav-underline {
+    border-bottom: 1px solid #e2e8f0;
+    flex-shrink: 0 !important;
+    margin-top: 0 !important;
+}
+.bslib-sidebar-panel .nav-tabs .nav-link,
+.bslib-sidebar-panel .nav-underline .nav-link {
+    background: transparent !important;
+    border: none !important;
+    border-radius: 0 !important;
+    color: #64748b !important;
+    border-bottom: 2px solid transparent !important;
+    margin-bottom: -1px;
+    font-size: 12px !important;
+    padding: 6px 10px !important;
+}
+.bslib-sidebar-panel .nav-tabs .nav-link.active,
+.bslib-sidebar-panel .nav-tabs .nav-link[aria-selected="true"],
+.bslib-sidebar-panel .nav-underline .nav-link.active,
+.bslib-sidebar-panel .nav-underline .nav-link[aria-selected="true"] {
+    color: #0f172a !important;
+    font-weight: 600 !important;
+    border-bottom: 2px solid #2563eb !important;
+    background: transparent !important;
+}
+
+/* Map container: fills viewport, padding on top/right/bottom like overlay spacing */
 .map-container {
     position: relative;
     width: 100%;
@@ -569,23 +801,25 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     overflow: hidden;
     border-radius: 8px;
 }
-/* Iframe absolutely fills the container — bypasses all Shiny output wrapper divs */
+/* Iframe fills container with bottom inset to match top/right padding */
 .map-container iframe {
     position: absolute !important;
     top: 0 !important;
     left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
+    width: 100% !important; 
+    height: 94% !important;
+    bottom: 6px !important;
     border: none !important;
     z-index: 1;
 }
 
-/* Floating control bar — transparent, overlaid on top of the map */
+/* Floating control bar — spans full map width, overlaid on top */
 .overlay-controls {
     position: absolute;
     top: 12px;
     left: 12px;
     right: 12px;
+    width: calc(100% - 24px);
     z-index: 20;
     display: flex;
     flex-wrap: nowrap;
@@ -593,6 +827,7 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     gap: 8px;
     background: transparent;
     padding: 0;
+    box-sizing: border-box;
 }
 /* Each input container grows/shrinks to fill the bar */
 .overlay-controls .shiny-input-container,
@@ -600,39 +835,82 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     flex: 1;
     min-width: 70px;
     margin-bottom: 0 !important;
-    min-height: unset !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    overflow: visible !important;
 }
-/* Search bar gets more space */
-.overlay-controls .shiny-input-container:first-child { flex: 2.5; min-width: 160px; }
+/* District search bar — grows to fill remaining space so row spans full map width */
+.overlay-controls .shiny-input-container:first-child { flex: 1 1 0; min-width: 140px; }
+/* Risk layer — wide enough for "Composite Score", "Hospital Capacity" */
+.overlay-controls .shiny-input-container:nth-child(2) { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
+/* Month — fit "September" */
+.overlay-controls .shiny-input-container:nth-child(3) { flex: 0 0 96px; min-width: 96px; max-width: 96px; }
+/* Day — fit "31" */
+.overlay-controls .shiny-input-container:nth-child(4) { flex: 0 0 48px; min-width: 48px; max-width: 48px; }
+/* Year — fit "2026" (4 digits + padding) */
+.overlay-controls .shiny-input-container:nth-child(5) { flex: 0 0 80px; min-width: 80px; max-width: 80px; }
 /* Hide all labels */
 .overlay-controls label { display: none !important; }
-/* White pill inputs */
-.overlay-controls input,
-.overlay-controls select {
-    background: #ffffff !important;
-    border-radius: 10px !important;
-    font-size: 13px !important;
-    height: 38px !important;
-    min-height: 38px !important;
-    padding: 4px 12px !important;
+/* Ensure selectize search bar matches dropdown height — compact */
+.overlay-controls .selectize-control {
+    margin: 0 !important;
+    height: 30px !important;
+    min-height: 30px !important;
+}
+/* White pill inputs — smaller, full width */
+.overlay-controls input {
+    background-color: #ffffff !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding: 2px 8px !important;
     border: 1px solid rgba(0,0,0,0.08) !important;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
     width: 100% !important;
 }
-/* Selectize type-ahead — match pill style */
+/* Native selects: background-color only (preserves Bootstrap's chevron background-image);
+   no padding-right override so the arrow stays readable */
+.overlay-controls select {
+    background-color: #ffffff !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    padding-left: 8px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    width: 100% !important;
+}
+/* Selectize type-ahead — match compact pill style */
 .overlay-controls .selectize-input {
     background: #ffffff !important;
-    border-radius: 10px !important;
-    font-size: 13px !important;
-    min-height: 38px !important;
-    height: 38px !important;
-    line-height: 28px !important;
-    padding: 4px 12px !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    min-height: 30px !important;
+    height: 30px !important;
+    line-height: 24px !important;
+    padding: 2px 8px !important;
     border: 1px solid rgba(0,0,0,0.08) !important;
-    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
     cursor: text !important;
-    display: flex !important;
-    align-items: center !important;
+}
+
+/* Selectize injects a real <input> inside .selectize-input; our generic
+   "input { height: 30px }" rule expands it, blowing out the outer container.
+   Reset it so the outer container stays 30px. */
+.overlay-controls .selectize-input input {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    width: auto !important;
 }
 
 .overlay-controls .selectize-input.focus {
@@ -640,15 +918,15 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     box-shadow: 0 0 0 2px rgba(37,99,235,0.15) !important;
 }
 .overlay-controls .selectize-dropdown {
-    border-radius: 10px !important;
-    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
-    font-size: 13px !important;
+    border-radius: 6px !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.12) !important;
+    font-size: 11px !important;
     border: 1px solid rgba(0,0,0,0.08) !important;
     margin-top: 4px !important;
     overflow: hidden !important;
 }
 .overlay-controls .selectize-dropdown .option {
-    padding: 7px 12px !important;
+    padding: 4px 8px !important;
     cursor: pointer !important;
 }
 .overlay-controls .selectize-dropdown .option:hover,
@@ -657,54 +935,111 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     color: #1d4ed8 !important;
 }
 
-/* Search button */
+/* Search button — compact, legend deep purple */
 .overlay-controls .action-button {
     flex-shrink: 0;
-    height: 38px;
-    min-height: 38px;
-    font-size: 13px;
+    height: 30px;
+    min-height: 30px;
+    font-size: 11px;
     font-weight: 500;
-    border-radius: 10px;
-    background-color: #2563eb !important;
+    border-radius: 6px;
+    background-color: #0d0887 !important;
     color: white !important;
     border: none !important;
-    padding: 0 20px;
-    box-shadow: 0 1px 6px rgba(37,99,235,0.3) !important;
+    padding: 0 14px;
+    box-shadow: 0 1px 4px rgba(13,8,135,0.3) !important;
     white-space: nowrap;
 }
-.overlay-controls .action-button:hover { background-color: #1d4ed8 !important; }
+.overlay-controls .action-button:hover { background-color: #7e03a8 !important; }
 
-/* Overlay cards */
-.overlay-stats { position: absolute; top: 68px; right: 12px; z-index: 10; }
+/* Search error banner under controls */
+.search-error-banner {
+    position: absolute;
+    top: 48px;
+    left: 12px;
+    right: 12px;
+    z-index: 25;
+    pointer-events: none;
+}
 
-/* Legend: bottom right, above leaflet attribution */
-.overlay-legend { position: absolute; bottom: 28px; right: 12px; z-index: 10; }
 
-/* Bottom row: Top Communities + Trend side by side, floating inside map */
+/* Overlay cards — compact */
+.overlay-stats {
+    position: absolute;
+    top: 48px;
+    right: 12px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.risk-layer-note {
+    margin-top: 4px;
+    width: 200px;
+    min-width: 200px;
+    max-width: 200px;
+    font-size: 9px;
+    color: #64748b;
+    background: rgba(255,255,255,0.42);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-radius: 6px;
+    padding: 4px 6px;
+    border: 1px solid rgba(255,255,255,0.4);
+}
+
+/* Legend: bottom right, moved up to stay within map */
+.overlay-legend { position: absolute; bottom: 56px; right: 12px; z-index: 10; }
+
+/* Bottom row: Top Communities + Trend — moved up to stay within map */
 .overlay-bottom-row {
     position: absolute;
-    bottom: 12px;
+    bottom: 50px;
     left: 12px;
     z-index: 10;
     display: flex;
-    gap: 10px;
+    gap: 8px;
     align-items: flex-end;
-    max-width: 780px;
+    max-width: 520px;
     pointer-events: none;
 }
 .overlay-bottom-row > div {
     pointer-events: all;
     flex: 1;
-    min-width: 280px;
-    max-width: 380px;
+    min-width: 220px;
+    max-width: 300px;
+}
+
+/* Top Communities At Risk card — size to content, no extra space below */
+.overlay-bottom-row > div:first-child {
+    height: auto;
+    min-height: 0;
+    min-width: 260px;
+    max-width: 320px;
+    display: flex;
+    align-self: flex-end;
+}
+
+.overlay-bottom-row > div:first-child .top-risk-card {
+    height: auto;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* Trend card — compact */
+.overlay-bottom-row > div:last-child {
+    flex: 0 0 160px;
+    max-width: 180px;
 }
 
 /* Markdown tables inside chat bubbles */
 .chat-bubble-bot table {
     border-collapse: collapse;
     width: 100%;
-    font-size: 12px;
-    margin: 6px 0;
+    font-size: 10px;
+    margin: 4px 0;
 }
 .chat-bubble-bot th, .chat-bubble-bot td {
     border: 1px solid #cbd5e1;
@@ -717,39 +1052,79 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
 }
 .chat-bubble-bot p { margin: 4px 0; }
 .chat-bubble-bot strong { font-weight: 700; }
+.chat-bubble-bot h1, .chat-bubble-bot h2, .chat-bubble-bot h3,
+.chat-bubble-bot h4, .chat-bubble-bot h5, .chat-bubble-bot h6 {
+    font-size: 12px !important; font-weight: 700; margin: 6px 0 2px;
+}
 
-/* Chat bubbles */
+/* Chat bubbles - messages app style; fills scrollable parent */
+.chat-area {
+    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-height: min-content;
+}
 .chat-bubble-user {
-    background: #2563eb; color: white;
-    border-radius: 12px 12px 2px 12px;
-    padding: 8px 12px; font-size: 13px;
-    margin-left: 20%; margin-bottom: 6px;
+    align-self: flex-end;
+    background: #7e03a8;
+    color: #ffffff;
+    border-radius: 14px 14px 4px 14px;
+    padding: 6px 10px;
+    font-size: 11px;
+    max-width: 78%;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.25);
 }
 .chat-bubble-bot {
-    background: rgba(0, 0, 0, 0.05); color: #0f172a;
-    border-radius: 12px 12px 12px 2px;
-    padding: 8px 12px; font-size: 13px;
-    margin-right: 20%; margin-bottom: 6px;
+    align-self: flex-start;
+    background: #e5e7eb;
+    color: #0f172a;
+    border-radius: 14px 14px 14px 4px;
+    padding: 6px 10px;
+    font-size: 11px;
+    max-width: 78%;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
 }
-.chat-area { max-height: 360px; overflow-y: auto; padding: 4px; margin-bottom: 8px; }
 
-/* AI Summary tab panels */
+/* AI Summary tab panels — compact */
 .cd-panel {
-    background: #f8fafc; border-left: 4px solid #6c757d;
-    border-radius: 6px; padding: 14px 16px; margin-bottom: 12px;
+    background: #ffffff; border-left: 3px solid #6c757d;
+    border-radius: 5px; padding: 8px 10px; margin-bottom: 8px;
 }
 .cd-panel h5 {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px 0;
+    font-size: 9px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: #64748b; margin: 0 0 4px 0;
 }
-.cd-panel .ai-content { font-size: 13px; line-height: 1.65; color: #1e293b; }
-.cd-panel .ai-content p { margin: 4px 0; }
-.cd-panel .ai-content table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 6px 0; }
-.cd-panel .ai-content th, .cd-panel .ai-content td { border: 1px solid #e2e8f0; padding: 4px 7px; }
+.cd-panel .ai-content { font-size: 11px; line-height: 1.5; color: #1e293b; }
+.cd-panel .ai-content p { margin: 2px 0; }
+.cd-panel .ai-content table { border-collapse: collapse; width: 100%; font-size: 10px; margin: 4px 0; }
+.cd-panel .ai-content th, .cd-panel .ai-content td { border: 1px solid #e2e8f0; padding: 2px 5px; }
 .cd-panel .ai-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
 .cd-panel-summary { border-left-color: #e05c2a; }
 .cd-panel-recs    { border-left-color: #2a7ae0; }
-#ai_summary_tab { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
+#ai_summary_wrapper { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
+
+/* AI Summary skeleton overlay */
+.ai-summary-skeleton {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    z-index: 20;
+    display: none;
+    padding: 8px 0;
+}
+.ai-summary-skeleton.visible { display: block; }
+.skel-block {
+    border-radius: 4px;
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.4s infinite linear;
+    margin-bottom: 6px;
+}
+@keyframes skel-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
+}
 
 /* Typing dots indicator */
 .typing-indicator { display: flex; align-items: center; gap: 4px; padding: 10px 14px; }
@@ -763,6 +1138,31 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
     30% { transform: translateY(-6px); opacity: 1; }
 }
+
+/* Restore visible cursor for interactive chips and chat controls */
+#prompt1, #prompt2, #prompt3, #prompt4, #prompt5,
+#chat_send, #clear_chat {
+    cursor: pointer !important;
+}
+#clear_chat {
+    background: transparent !important;
+}
+
+#chat_input {
+    cursor: text !important;
+    caret-color: #2563eb !important;
+    border-radius: 8px !important;
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    border: 1px solid rgba(0,0,0,0.1) !important;
+    background: transparent !important;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease !important;
+}
+#chat_input:focus {
+    outline: none !important;
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.15) !important;
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -773,51 +1173,162 @@ app_ui = ui.page_fillable(
     ui.tags.head(ui.tags.style(APP_CSS)),
     ui.layout_sidebar(
         ui.sidebar(
-            ui.h5("NYC Urban Risk", style="font-weight:700;color:#0f172a;margin-bottom:2px;"),
-            ui.p("Early Warning System", style="font-size:12px;color:#64748b;margin-top:0;"),
-            ui.navset_tab(
-                ui.nav_panel(
-                    "Chatbot",
-                    ui.p("Suggested prompts",
-                         style="font-size:12px;color:#64748b;margin:8px 0 4px;"),
-                    ui.input_action_button(
-                        "prompt1", "Which CDs show rising heat and hospital strain?",
-                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                        style="text-align:left;white-space:normal;"),
-                    ui.input_action_button(
-                        "prompt2", "Where is risk accelerating the fastest?",
-                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                        style="text-align:left;white-space:normal;"),
-                    ui.input_action_button(
-                        "prompt3", "How does today compare to similar patterns?",
-                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                        style="text-align:left;white-space:normal;"),
-                    ui.input_action_button(
-                        "prompt4", "Which agencies need to coordinate?",
-                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
-                        style="text-align:left;white-space:normal;"),
-                    ui.hr(),
-                    ui.div(
-                        ui.input_action_button(
-                            "clear_chat", "Clear chat",
-                            class_="btn btn-outline-secondary btn-sm",
-                            style="font-size:11px;padding:2px 10px;"),
-                        style="text-align:right;margin-bottom:4px;",
-                    ),
-                    ui.output_ui("chat_messages_ui"),
-                    ui.input_text(
-                        "chat_input", None,
-                        placeholder="Type your question here...", width="100%"),
-                    ui.input_action_button(
-                        "chat_send", "Send",
-                        class_="btn btn-primary btn-sm w-100 mt-1"),
+            ui.div(
+                ui.h5("NYC Risk Horizon", style="font-size:20px;font-weight:700;color:#0f172a;margin:0;"),
+                ui.p(
+                    "Community Risk Insight & Action Platform",
+                    style="font-size:13px;color:#64748b;margin:2px 0 0 0;",
                 ),
+                ui.p(
+                    "This prototype uses synthetic data. Do not use this information for real-world decisions.",
+                    style="font-size:10px;color:#94a3b8;margin:3px 0 0 0;",
+                ),
+                style="margin:0 0 0 0;",
+            ),
+            ui.div(
+              ui.navset_underline(
                 ui.nav_panel(
                     "AI Summary",
-                    ui.div(ui.output_ui("ai_summary_tab"), id="ai_summary_tab"),
+                    ui.div(
+                        ui.output_ui("ai_summary_tab"),
+                        ui.HTML("""
+                        <div class="ai-summary-skeleton" id="ai-summary-skeleton">
+                          <div class="skel-block" style="height:11px;width:48%;"></div>
+                          <div class="skel-block" style="height:9px;width:22%;margin-bottom:14px;"></div>
+                          <div class="skel-block" style="height:90px;width:100%;border-radius:5px;margin-bottom:10px;"></div>
+                          <div class="skel-block" style="height:90px;width:100%;border-radius:5px;"></div>
+                        </div>
+                        <script>
+                        (function() {
+                          $(document).on('shiny:recalculating', function(e) {
+                            if (e.target.id === 'ai_summary_tab') {
+                              $('#ai-summary-skeleton').addClass('visible');
+                            }
+                          });
+                          $(document).on('shiny:value shiny:error', function(e) {
+                            if (e.target.id === 'ai_summary_tab') {
+                              $('#ai-summary-skeleton').removeClass('visible');
+                            }
+                          });
+                        })();
+                        </script>
+                        """),
+                        id="ai_summary_wrapper",
+                        style="position:relative;",
+                    ),
                 ),
+                ui.nav_panel(
+                    "Chatbot",
+                    ui.div(
+                        ui.div(
+                            ui.div(
+                                ui.p("Suggested prompts",
+                                     style="font-size:10px;color:#64748b;margin:0;font-weight:500;"),
+                                ui.input_action_button(
+                                    "clear_chat", "Clear",
+                                    class_="btn btn-link btn-sm",
+                                    style="font-size:9px;padding:0;color:#94a3b8;text-decoration:none;"),
+                                class_="chat-panel-prompts-header",
+                            ),
+                            ui.div(
+                                ui.tags.button("Which neighborhoods show rising heat and hospital strain?",
+                                    id="prompt1", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("Where is risk accelerating the fastest?",
+                                    id="prompt2", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("How does today compare to similar historical patterns?",
+                                    id="prompt3", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("Is summer heat risk getting worse year over year?",
+                                    id="prompt4", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("How has hospital capacity changed since 2020?",
+                                    id="prompt5", type="button", class_="action-button prompt-btn"),
+                                class_="chat-panel-prompts-grid",
+                            ),
+                            class_="chat-panel-prompts",
+                        ),
+                        ui.div(
+                            ui.div(ui.output_ui("chat_messages_ui"), class_="chat-panel-messages"),
+                            ui.HTML("""
+                            <div id="chat-typing-indicator" style="display:none;padding:4px 8px;">
+                              <div class="chat-bubble-bot" style="padding:0;background:rgba(0,0,0,0.05);">
+                                <div class="typing-indicator"><span></span><span></span><span></span></div>
+                              </div>
+                            </div>
+                            <script>
+                            (function() {
+                              var botCountAtSend = 0;
+                              function escHtml(s) {
+                                return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                              }
+                              function scrollChat() {
+                                var el = document.querySelector('.chat-panel-messages-scroll');
+                                if (el) el.scrollTop = el.scrollHeight;
+                              }
+                              function showTyping() {
+                                document.getElementById('chat-typing-indicator').style.display = 'block';
+                                setTimeout(scrollChat, 20);
+                              }
+                              function hideTyping() {
+                                document.getElementById('chat-typing-indicator').style.display = 'none';
+                              }
+                              function sendMessage(msg) {
+                                if (!msg) return;
+                                // Snapshot bot count before this send
+                                botCountAtSend = $('#chat_messages_ui .chat-bubble-bot').length;
+                                // Inject user bubble immediately
+                                var $area = $('#chat_messages_ui .chat-area');
+                                if ($area.length) {
+                                  $area.append('<div class="chat-bubble-user">' + escHtml(msg) + '</div>');
+                                }
+                                showTyping();
+                              }
+                              $(document).on('click', '#chat_send', function() {
+                                var msg = ($('#chat_input').val() || '').trim();
+                                if (msg) sendMessage(msg);
+                              });
+                              $(document).on('click', '#prompt1, #prompt2, #prompt3, #prompt4, #prompt5', function() {
+                                sendMessage($(this).text().trim());
+                              });
+                              $(document).on('keydown', '#chat_input', function(e) {
+                                if (e.key === 'Enter') { e.preventDefault(); $('#chat_send').click(); }
+                              });
+                              // Hide dots only once a new bot bubble has appeared
+                              $(document).on('shiny:value', function(e) {
+                                if (e.target.id !== 'chat_messages_ui') return;
+                                setTimeout(function() {
+                                  var current = $('#chat_messages_ui .chat-bubble-bot').length;
+                                  if (current > botCountAtSend) {
+                                    hideTyping();
+                                    scrollChat();
+                                  } else {
+                                    scrollChat();
+                                  }
+                                }, 50);
+                              });
+                            })();
+                            </script>
+                            """),
+                            class_="chat-panel-messages-scroll",
+                        ),
+                        ui.div(
+                            ui.div(
+                                ui.input_text(
+                                    "chat_input", None,
+                                    placeholder="Type your question here...", width="100%"),
+                                ui.input_action_button(
+                                    "chat_send", "Send",
+                                    class_="btn btn-primary btn-sm"),
+                                class_="chat-panel-input-row",
+                            ),
+                            class_="chat-panel-input",
+                        ),
+                        class_="chat-panel-outer",
+                    ),
+                ),
+                selected="AI Summary",
+              ),
+              style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;",
             ),
-            width=320,
+            width=450,
         ),
         # ---------- Main area: full-bleed map with all overlays ----------
         ui.div(
@@ -831,7 +1342,7 @@ app_ui = ui.page_fillable(
                     selected="",
                     width="100%",
                     options={
-                        "placeholder": "Search your community district...",
+                        "placeholder": "Choose your district",
                         "allowEmptyOption": True,
                         "maxOptions": 80,
                     },
@@ -839,24 +1350,39 @@ app_ui = ui.page_fillable(
                 ui.input_select(
                     "risk_layer", None,
                     choices={k: v["label"] for k, v in RISK_LAYERS.items()},
+                    selected="transit_delay_index",
                     width="100%"),
                 ui.input_select(
                     "sel_month", None,
                     choices=MONTHS_ORD,
-                    selected=MONTHS_ORD[-1] if MONTHS_ORD else None,
+                    selected="March" if "March" in MONTHS_ORD else (MONTHS_ORD[0] if MONTHS_ORD else None),
                     width="100%"),
                 ui.input_numeric(
                     "sel_day", None,
-                    value=DATE_MAX.day, min=1, max=31, width="100%"),
+                    value=6, min=1, max=31, width="100%"),
                 ui.input_select(
                     "sel_year", None,
                     choices=YEARS_ORD,
-                    selected=YEARS_ORD[-1] if YEARS_ORD else None,
+                    selected="2026" if "2026" in YEARS_ORD else (YEARS_ORD[-1] if YEARS_ORD else None),
                     width="100%"),
+                ui.input_action_button("search_go", "Search"),
                 class_="overlay-controls",
             ),
-            # Stats card (top right)
-            ui.div(ui.output_ui("cd_stats"), class_="overlay-stats"),
+            ui.div(ui.output_ui("search_error_ui"), class_="search-error-banner"),
+            # Stats card (top right) + brief risk layer description
+            ui.div(
+                ui.output_ui("cd_stats"),
+                ui.div(
+                    ui.HTML(
+                        "<strong>Heat Index Risk</strong>: risk of dangerous outdoor heat conditions. "
+                        "<br><strong>Hospital Capacity</strong>: how full local hospitals and ICUs are. "
+                        "<br><strong>Transit Delay Index</strong>: typical transit slowdowns affecting access to care. "
+                        "<br><strong>Composite Score</strong>: combined index of heat, hospital, and transit risk (higher = more risk)."
+                    ),
+                    class_="risk-layer-note",
+                ),
+                class_="overlay-stats",
+            ),
             # Legend (bottom right)
             ui.div(ui.output_ui("legend_ui"), class_="overlay-legend"),
             # Bottom row: Top Communities At Risk + Trend side by side
@@ -864,6 +1390,16 @@ app_ui = ui.page_fillable(
                 ui.div(ui.output_ui("top_risk_ui")),
                 ui.div(ui.output_ui("trend_ui")),
                 class_="overlay-bottom-row",
+            ),
+            # Attribution line pinned to the very bottom-right of the map
+            ui.div(
+                "Created by Louise Smith & Allyanna Panganiban",
+                style=(
+                    "position:absolute;bottom:4%;right:11px;z-index:10;"
+                    "font-size:8px;line-height:1;margin:0;padding:0;"
+                    "font-weight:bold;"
+                    "color:#000000;font-family:system-ui,-apple-system,sans-serif;"
+                ),
             ),
             class_="map-container",
         ),
@@ -876,9 +1412,13 @@ app_ui = ui.page_fillable(
 
 def server(input, output, session):
 
-    selected_cd  = reactive.Value(None)
-    chat_msgs    = reactive.Value([])
-    is_typing    = reactive.Value(False)
+    selected_cd   = reactive.Value(None)
+    chat_msgs     = reactive.Value([])
+    chat_history  = reactive.Value(None)   # PydanticAI ModelMessage history
+    search_error  = reactive.Value("")
+    _default_date = max(DATE_MIN, min(DATE_MAX, pd.Timestamp("2026-03-06").date()))
+    applied_date  = reactive.Value(_default_date)
+    applied_layer = reactive.Value("transit_delay_index")
 
     # ---- Date ----------------------------------------------------------------
 
@@ -897,7 +1437,7 @@ def server(input, output, session):
     @reactive.calc
     def risk_data():
         try:
-            rows = get_risk_data(str(selected_date()))
+            rows = get_risk_data(str(applied_date()))
             return pd.DataFrame(rows) if rows else pd.DataFrame()
         except Exception as e:
             print(f"Risk data error: {e}")
@@ -907,7 +1447,7 @@ def server(input, output, session):
     def prev_risk_data():
         """Risk data 30 days before selected_date — used for trend arrows in stats card."""
         try:
-            prev_date = selected_date() - pd.Timedelta(days=30)
+            prev_date = applied_date() - pd.Timedelta(days=30)
             prev_date = max(DATE_MIN, prev_date)
             rows = get_risk_data(str(prev_date))
             return pd.DataFrame(rows) if rows else pd.DataFrame()
@@ -918,7 +1458,7 @@ def server(input, output, session):
     @reactive.calc
     def composite_data():
         df    = risk_data().copy()
-        layer = input.risk_layer()
+        layer = applied_layer()
         if df.empty or not layer:
             return df
         if layer == "composite":
@@ -943,28 +1483,97 @@ def server(input, output, session):
         if click and isinstance(click, dict) and click.get("cd_id"):
             selected_cd.set(dict(click))
 
+    # ---- Layer change (immediate — no Search required) -----------------------
+
+    @reactive.effect
+    def _on_layer_change():
+        applied_layer.set(input.risk_layer())
+
     # ---- Search (type-ahead selectize — auto-selects on pick) ----------------
 
     @reactive.effect
+    @reactive.event(input.search_go)
     def _on_search():
-        cd_id = (input.search_cd() or "").strip()
-        if not cd_id or CD_LOOKUP.empty:
+        cd_id   = (input.search_cd() or "").strip()
+        layer   = input.risk_layer()
+        m_name  = input.sel_month()
+        year_in = input.sel_year()
+        day_in  = input.sel_day()
+
+        # Basic completeness checks
+        if (not cd_id) or (not layer) or (not m_name) or (year_in is None) or (day_in is None):
+            search_error.set("Please enter a valid community district, risk layer, month, day, and year before searching.")
+            return
+
+        # Validate community district
+        if CD_LOOKUP.empty:
+            search_error.set("No community district metadata is available.")
             return
         match = CD_LOOKUP[CD_LOOKUP["cd_id"] == cd_id]
-        if not match.empty:
-            r = match.iloc[0]
-            selected_cd.set({
-                "cd_id":        r["cd_id"],
-                "borough":      r["borough"],
-                "neighborhood": r["neighborhood"],
-            })
+        if match.empty:
+            search_error.set("Community District not found. Please select one from the list.")
+            return
+
+        # Validate risk layer
+        if layer not in RISK_LAYERS:
+            search_error.set("Please choose a risk layer instead of the default placeholder.")
+            return
+
+        # Validate day
+        try:
+            d_int = int(day_in)
+        except (TypeError, ValueError):
+            search_error.set("Please enter a valid day between 1 and 31.")
+            return
+        if d_int < 1 or d_int > 31:
+            search_error.set("Please enter a valid day between 1 and 31.")
+            return
+
+        # Validate month
+        if m_name not in _MNAMES:
+            search_error.set("Please select a valid month.")
+            return
+        m = _MNAMES.index(m_name) + 1
+
+        # Validate year
+        try:
+            y = int(year_in)
+        except (TypeError, ValueError):
+            search_error.set("Please select a valid year.")
+            return
+
+        max_d = calendar.monthrange(y, m)[1]
+        if d_int > max_d:
+            search_error.set(f"The selected month has only {max_d} days.")
+            return
+
+        try:
+            dt = pd.Timestamp(year=y, month=m, day=d_int).date()
+        except Exception:
+            search_error.set("Please enter a valid date.")
+            return
+
+        if dt < DATE_MIN or dt > DATE_MAX:
+            search_error.set(f"Date out of range. Please choose between {DATE_MIN} and {DATE_MAX}.")
+            return
+
+        # All good: apply search parameters
+        search_error.set("")
+        r = match.iloc[0]
+        selected_cd.set({
+            "cd_id":        r["cd_id"],
+            "borough":      r["borough"],
+            "neighborhood": r["neighborhood"],
+        })
+        applied_date.set(dt)
+        applied_layer.set(layer)
 
     # ---- Map render ----------------------------------------------------------
 
     @render.ui
     def map_html():
         cd    = composite_data()
-        layer = input.risk_layer()
+        layer = applied_layer()
         li    = RISK_LAYERS[layer]
         risk_by_cd = (
             cd.set_index("cd_id")["display_val"].to_dict()
@@ -994,23 +1603,40 @@ def server(input, output, session):
 
     @render.ui
     def top_risk_ui():
-        li = RISK_LAYERS[input.risk_layer()]
+        li = RISK_LAYERS[applied_layer()]
         return ui.HTML(_top_risk_html(composite_data(), li))
 
     # ---- Trend ---------------------------------------------------------------
 
     @render.ui
     def trend_ui():
-        layer = input.risk_layer()
+        layer = applied_layer()
         return ui.HTML(_trend_html(
-            selected_cd(), layer, RISK_LAYERS[layer], str(selected_date()), trend_days=30,
+            selected_cd(), layer, RISK_LAYERS[layer], str(applied_date()), trend_days=30,
         ))
 
     # ---- Legend --------------------------------------------------------------
 
     @render.ui
     def legend_ui():
-        return ui.HTML(_legend_html(RISK_LAYERS[input.risk_layer()]))
+        return ui.HTML(_legend_html(RISK_LAYERS[applied_layer()]))
+
+    # ---- Search error banner --------------------------------------------------
+
+    @render.ui
+    def search_error_ui():
+        msg = search_error()
+        if not msg:
+            return ui.HTML("")
+        return ui.div(
+            msg,
+            style=(
+                "display:inline-flex;align-items:center;gap:6px;"
+                "font-size:12px;background:rgba(248,113,113,0.96);color:#ffffff;"
+                "padding:6px 10px;border-radius:8px;"
+                "box-shadow:0 2px 10px rgba(248,113,113,0.4);"
+            ),
+        )
 
     # ---- AI Summary tab ------------------------------------------------------
 
@@ -1021,19 +1647,13 @@ def server(input, output, session):
             return ui.div(
                 ui.p(
                     "Click a district on the map or use search to load its AI summary.",
-                    style="font-size:13px;color:#64748b;margin-top:12px;",
+                    style="font-size:11px;color:#64748b;margin-top:4px;",
                 )
             )
 
         cd_id    = sc["cd_id"]
         name     = sc.get("neighborhood") or cd_id
-        borough  = sc.get("borough", "")
-        date_str = str(selected_date())
-
-        header = ui.div(
-            ui.tags.strong(name, style="font-size:16px;color:#0f172a;"),
-            ui.p(f"{borough} | {cd_id}", style="font-size:12px;color:#64748b;margin:2px 0 10px;"),
-        )
+        date_str = str(applied_date())
 
         loop = asyncio.get_event_loop()
         try:
@@ -1050,6 +1670,10 @@ def server(input, output, session):
         except Exception as e:
             recs = f"Error generating decision signals: {e}"
 
+        header = ui.div(
+            ui.tags.strong(name, style="font-size:12px;color:#0f172a;"),
+            ui.p(cd_id, style="font-size:10px;color:#64748b;margin:1px 0 6px;"),
+        )
         return ui.div(
             header,
             ui.div(
@@ -1072,24 +1696,24 @@ def server(input, output, session):
         if not msg or not msg.strip():
             return
         chat_msgs.set(chat_msgs() + [{"role": "user", "content": msg}])
-        is_typing.set(True)
-        date_str = str(selected_date())
+        date_str = str(applied_date())
+        history  = chat_history()
         try:
             loop   = asyncio.get_event_loop()
             result = await loop.run_in_executor(
-                _CHAT_EXECUTOR, lambda: run_chat(msg, date_str, None)
+                _CHAT_EXECUTOR, lambda: run_chat(msg, date_str, history)
             )
             response = result["response"]
+            chat_history.set(result["history"])
         except Exception as e:
             response = f"Error: {e}"
-        finally:
-            is_typing.set(False)
         chat_msgs.set(chat_msgs() + [{"role": "assistant", "content": response}])
 
     @reactive.effect
     @reactive.event(input.clear_chat)
     def _on_clear_chat():
         chat_msgs.set([])
+        chat_history.set(None)
 
     @reactive.effect
     @reactive.event(input.chat_send)
@@ -1115,7 +1739,12 @@ def server(input, output, session):
     @reactive.effect
     @reactive.event(input.prompt4)
     async def _p4():
-        await _send_chat("Which agencies need to coordinate?")
+        await _send_chat("Is summer heat risk getting worse year over year?")
+
+    @reactive.effect
+    @reactive.event(input.prompt5)
+    async def _p5():
+        await _send_chat("How has hospital capacity changed since 2020?")
 
     @render.ui
     def chat_messages_ui():
@@ -1125,11 +1754,7 @@ def server(input, output, session):
                 ui.p(
                     "I can help you analyze current risk across NYC Community Districts. "
                     "What do you want to learn about?",
-                    style=(
-                        "font-size:13px;color:#334155;"
-                        "background:rgba(0,0,0,0.04);"
-                        "border-radius:8px;padding:10px;margin:0;"
-                    ),
+                    style="font-size:11px;color:#64748b;margin:0;padding:4px 2px;",
                 ),
                 class_="chat-area",
             )
@@ -1143,14 +1768,6 @@ def server(input, output, session):
                     extensions=["tables", "nl2br"],
                 )
                 items.append(ui.div(ui.HTML(rendered), class_="chat-bubble-bot"))
-        if is_typing():
-            items.append(
-                ui.div(
-                    ui.HTML('<div class="typing-indicator"><span></span><span></span><span></span></div>'),
-                    class_="chat-bubble-bot",
-                    style="padding:0;background:rgba(0,0,0,0.05);",
-                )
-            )
         return ui.div(*items, class_="chat-area")
 
 

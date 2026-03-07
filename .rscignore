@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.env
+data/heat_index.csv
+data/hospital_capacity.csv
+data/transit_delays.csv
+data/DATA_GENERATION.md
+scripts/
+app/__pycache__/
+app/chatbot/__pycache__/
+app_ui/__pycache__/

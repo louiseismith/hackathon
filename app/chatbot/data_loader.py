@@ -14,14 +14,27 @@ load_dotenv(_THIS_DIR.parent.parent / ".env")
 load_dotenv()  # fallback to cwd
 
 
+# Module-level singleton — created once, shared across all queries.
+# pool_size=2 + max_overflow=0 caps us at 2 connections total so we
+# never saturate Supabase's session-mode pool limit.
+_ENGINE = None
+
 def _get_engine():
-    host     = os.getenv("SUPABASE_HOST")
-    port     = os.getenv("SUPABASE_PORT", "5432")
-    dbname   = os.getenv("SUPABASE_DB", "postgres")
-    user     = os.getenv("SUPABASE_USER", "postgres")
-    password = os.getenv("SUPABASE_PASSWORD", "")
-    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}?sslmode=require&connect_timeout=10"
-    return create_engine(url)
+    global _ENGINE
+    if _ENGINE is None:
+        host     = os.getenv("SUPABASE_HOST")
+        port     = os.getenv("SUPABASE_PORT", "5432")
+        dbname   = os.getenv("SUPABASE_DB", "postgres")
+        user     = os.getenv("SUPABASE_USER", "postgres")
+        password = os.getenv("SUPABASE_PASSWORD", "")
+        url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}?sslmode=require&connect_timeout=10"
+        _ENGINE = create_engine(
+            url,
+            pool_size=2,
+            max_overflow=0,
+            pool_pre_ping=True,   # recycles stale connections
+        )
+    return _ENGINE
 
 
 # Base SELECT joining all four tables into one flat row per (cd, date)

@@ -1,11 +1,15 @@
-# Data generation scripts and schema (internal use only)
-scripts/
-schema.sql
-data/
+# Data generation and upload scripts (internal use only)
+scripts/generate_heat_index.py
+scripts/generate_hospital_capacity.py
+scripts/generate_transit_delays.py
+scripts/upload_to_supabase.py
 
 # Environment
 .env
 .venv/
+
+# Generated map (rebuilt on each render)
+app_ui/www/map.html
 
 # Python
 __pycache__/
