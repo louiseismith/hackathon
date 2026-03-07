@@ -630,10 +630,12 @@ html, body {
     height: 100vh !important;
     overflow: hidden !important;
 }
-.bslib-sidebar-panel .sidebar-content {
-    padding-top: 4px !important;
+.bslib-sidebar-panel .sidebar-content,
+.bslib-sidebar-layout > .bslib-sidebar-panel > .sidebar-content {
+    padding: 12px 16px 0 16px !important;
     display: flex !important;
     flex-direction: column !important;
+    gap: 0 !important;
     flex: 1 !important;
     min-height: 0 !important;
     height: 100% !important;
@@ -1095,14 +1097,17 @@ app_ui = ui.page_fillable(
     ui.tags.head(ui.tags.style(APP_CSS)),
     ui.layout_sidebar(
         ui.sidebar(
-            ui.h5("NYC Risk Horizon", style="font-size:22px;font-weight:700;color:#0f172a;margin:0 0 -1px 0;"),
-            ui.p(
-                "Community Risk Insight &\n Action Platform",
-                style="font-size:14px;color:#64748b;margin:0 0 2px 0;",
-            ),
-            ui.p(
-                "This prototype uses synthetic data. Do not use this information for real-world decisions.",
-                style="font-size:10px;color:#94a3b8;margin:2px 0 4px 0;",
+            ui.div(
+                ui.h5("NYC Risk Horizon", style="font-size:20px;font-weight:700;color:#0f172a;margin:0;"),
+                ui.p(
+                    "Community Risk Insight & Action Platform",
+                    style="font-size:13px;color:#64748b;margin:2px 0 0 0;",
+                ),
+                ui.p(
+                    "This prototype uses synthetic data. Do not use this information for real-world decisions.",
+                    style="font-size:10px;color:#94a3b8;margin:3px 0 0 0;",
+                ),
+                style="margin:0 0 0 0;",
             ),
             ui.div(
               ui.navset_underline(
