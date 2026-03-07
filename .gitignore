@@ -4,6 +4,9 @@ scripts/generate_hospital_capacity.py
 scripts/generate_transit_delays.py
 scripts/upload_to_supabase.py
 
+# macOS
+.DS_Store
+
 # Environment
 .env
 .venv/

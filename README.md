@@ -6,6 +6,30 @@ Built for SYSEN 5381 (Cornell), Spring 2026.
 
 ---
 
+## Table of contents
+
+- [What it does](#what-it-does)
+- [Setup](#setup)
+- [Architecture](#architecture)
+- [Chatbot tools](#chatbot-tools)
+  - [1. get_cd_snapshot](#1-get_cd_snapshot)
+  - [2. get_top_risk_cds](#2-get_top_risk_cds)
+  - [3. get_fastest_accelerating](#3-get_fastest_accelerating)
+  - [4. query_combined_risk](#4-query_combined_risk)
+  - [5. compare_to_historical_analogs](#5-compare_to_historical_analogs)
+  - [6. get_agency_coordination_recommendations](#6-get_agency_coordination_recommendations)
+  - [7. get_multiyear_trend](#7-get_multiyear_trend)
+- [Map features](#map-features)
+- [Test scenarios](#test-scenarios)
+  - [Baseline: Normal conditions (2026-03-06)](#baseline-normal-conditions-2026-03-06)
+  - [Scenario 1: Summer heat wave (2025-07-18)](#scenario-1-summer-heat-wave--south-bronx-2025-07-18)
+  - [Scenario 2: Post-storm transit disruption (2021-09-02)](#scenario-2-post-storm-transit-disruption--city-wide-2021-09-02)
+  - [Scenario 3: Winter hospital strain (2022-01-13)](#scenario-3-winter-hospital-strain--outer-boroughs-2022-01-13)
+- [Data](#data)
+- [Validation scripts](#validation-scripts)
+
+---
+
 ## What it does
 
 NYC Risk Horizon is a split-panel dashboard. The right side is always the map; the left sidebar switches between two modes via tabs.
@@ -253,6 +277,9 @@ The highest-heat day in the dataset. Average heat_index_risk of 96.7 across the 
 - "Which neighborhoods have the highest heat risk?" → uses `get_top_risk_cds`
 - "Where is heat getting worse year over year?" → uses `get_multiyear_trend`
 
+![AI Summary panel for Longwood/Melrose (BX-02) on July 18, 2025 — severe heat index risk flagged as primary concern](docs/250718_1.png)
+![Chatbot response ranking neighborhoods by heat risk on July 18, 2025](docs/250718_2.png)
+
 ---
 
 ### Scenario 2: Post-storm transit disruption — city-wide (2021-09-02)
@@ -264,6 +291,10 @@ Hurricane Ida aftermath — the highest combined-stress day in the entire datase
 - "How does today compare to similar historical patterns for BK-16?" → uses `compare_to_historical_analogs`
 - "Which neighborhoods have elevated transit and hospital risk simultaneously?" → uses `query_combined_risk`
 
+![AI Summary panel for Greenpoint/Williamsburg (BK-01) on September 2, 2021 — transit delay index at record high for the month](docs/210902_1.png)
+![Chatbot response identifying neighborhoods with elevated transit and hospital risk simultaneously](docs/210902_2.png)
+![Chatbot response continued — Brownsville flagged as having the highest transit delay index](docs/210902_3.png)
+
 ---
 
 ### Scenario 3: Winter hospital strain — outer boroughs (2022-01-13)
@@ -274,6 +305,10 @@ COVID Omicron wave peak — the highest hospital strain day in the dataset. Aver
 - "Which neighborhoods show the highest hospital strain?" → uses `get_top_risk_cds` with `factor=hospital`
 - "How has hospital capacity changed since 2020 in the Bronx?" → uses `get_multiyear_trend`
 - "Is summer heat risk getting worse year over year?" → uses `get_multiyear_trend` with seasonal filter
+
+![AI Summary panel for Elmhurst/Corona (QN-04) on January 13, 2022 — hospital capacity at maximum, flagged as critical](docs/220113_1.png)
+![Chatbot response listing neighborhoods at 100% hospital bed capacity](docs/220113_2.png)
+![Chatbot response continued — additional Bronx and Brooklyn districts at critical hospital strain](docs/220113_3.png)
 
 ---
 
