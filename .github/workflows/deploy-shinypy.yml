@@ -1,0 +1,36 @@
+name: Deploy Shiny Python App to Posit Connect
+
+on:
+  push:
+    branches: [prompt_dev]
+    paths:
+      - 'app_ui/**'
+      - 'app/**'
+      - 'requirements.txt'
+      - '.github/workflows/deploy-shinypy.yml'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install rsconnect
+        run: pip install rsconnect-python
+
+      - name: Publish to Posit Connect
+        run: rsconnect deploy shiny --server ${{ secrets.CONNECT_SERVER }} --api-key ${{ secrets.CONNECT_API_KEY }} --entrypoint app_ui/app.py --python $(which python) .
+        env:
+          SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
+          SUPABASE_PORT: ${{ secrets.SUPABASE_PORT }}
+          SUPABASE_DB: ${{ secrets.SUPABASE_DB }}
+          SUPABASE_USER: ${{ secrets.SUPABASE_USER }}
+          SUPABASE_PASSWORD: ${{ secrets.SUPABASE_PASSWORD }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
