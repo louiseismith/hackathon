@@ -758,6 +758,9 @@ button#prompt4:hover, button#prompt5:hover {
 .chat-panel-input .btn-primary {
     font-size: 10px !important;
     padding: 6px 14px !important;
+    background-color: #0d0887 !important;
+    background: #0d0887 !important;
+    border-color: #0d0887 !important;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -1059,7 +1062,7 @@ button#prompt4:hover, button#prompt5:hover {
 }
 .chat-bubble-user {
     align-self: flex-end;
-    background: #2563eb;
+    background: #7e03a8;
     color: #ffffff;
     border-radius: 14px 14px 4px 14px;
     padding: 6px 10px;
@@ -1135,7 +1138,7 @@ button#prompt4:hover, button#prompt5:hover {
 #chat_send, #clear_chat {
     cursor: pointer !important;
 }
-#prompt1, #prompt2, #prompt3, #prompt4, #prompt5, #clear_chat {
+#clear_chat {
     background: transparent !important;
 }
 
