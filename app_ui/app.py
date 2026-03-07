@@ -634,20 +634,7 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     display: flex !important;
     align-items: center !important;
 }
-.overlay-controls .selectize-input.has-items {
-    height: auto !important;
-    flex-wrap: wrap !important;
-    gap: 3px !important;
-    padding: 4px 8px !important;
-}
-.overlay-controls .selectize-input .item {
-    background: #eff6ff !important;
-    border: 1px solid #bfdbfe !important;
-    border-radius: 6px !important;
-    color: #1d4ed8 !important;
-    font-size: 12px !important;
-    padding: 1px 6px !important;
-}
+
 .overlay-controls .selectize-input.focus {
     border-color: #2563eb !important;
     box-shadow: 0 0 0 2px rgba(37,99,235,0.15) !important;
@@ -849,14 +836,10 @@ app_ui = ui.page_fillable(
                         "maxOptions": 80,
                     },
                 ),
-                ui.input_selectize(
-                    "risk_factors", None,
-                    choices={k: v["label"] for k, v in METRICS.items()},
-                    selected=list(METRICS.keys()),
-                    multiple=True,
-                    width="100%",
-                    options={"placeholder": "Select risk factors...", "plugins": ["remove_button"]},
-                ),
+                ui.input_select(
+                    "risk_layer", None,
+                    choices={k: v["label"] for k, v in RISK_LAYERS.items()},
+                    width="100%"),
                 ui.input_select(
                     "sel_month", None,
                     choices=MONTHS_ORD,
@@ -933,38 +916,18 @@ def server(input, output, session):
             return pd.DataFrame()
 
     @reactive.calc
-    def active_layer():
-        """Return (layer_str, layer_info) based on selected risk factors.
-        Single factor → that metric; multiple → combined risk index."""
-        factors = [f for f in (input.risk_factors() or ()) if f in METRICS]
-        if not factors:
-            factors = list(METRICS.keys())
-        if len(factors) == 1:
-            f = factors[0]
-            return f, RISK_LAYERS[f]
-        return "composite", {
-            "label":  "Combined Risk Index",
-            "col":    "composite",
-            "domain": (0, 100),
-            "unit":   "/ 100",
-        }
-
-    @reactive.calc
     def composite_data():
-        df = risk_data().copy()
-        if df.empty:
+        df    = risk_data().copy()
+        layer = input.risk_layer()
+        if df.empty or not layer:
             return df
-        layer, li = active_layer()
         if layer == "composite":
-            factors = [f for f in (input.risk_factors() or ()) if f in METRICS]
-            if not factors:
-                factors = list(METRICS.keys())
-            for f in factors:
-                mv = METRICS[f]
-                df[f + "_n"] = normalize_metric(df[mv["col"]].tolist(), mv["domain"])
-            df["display_val"] = df[[f + "_n" for f in factors]].mean(axis=1)
+            for mk, mv in METRICS.items():
+                df[mk + "_n"] = normalize_metric(df[mv["col"]].tolist(), mv["domain"])
+            df["display_val"] = df[[mk + "_n" for mk in METRICS]].mean(axis=1)
         else:
-            df["display_val"] = pd.to_numeric(df[li["col"]], errors="coerce")
+            col = RISK_LAYERS[layer]["col"]
+            df["display_val"] = pd.to_numeric(df[col], errors="coerce")
         return df
 
     # ---- Map click -----------------------------------------------------------
@@ -1000,8 +963,9 @@ def server(input, output, session):
 
     @render.ui
     def map_html():
-        cd = composite_data()
-        _, li = active_layer()
+        cd    = composite_data()
+        layer = input.risk_layer()
+        li    = RISK_LAYERS[layer]
         risk_by_cd = (
             cd.set_index("cd_id")["display_val"].to_dict()
             if not cd.empty and "display_val" in cd.columns
@@ -1030,24 +994,23 @@ def server(input, output, session):
 
     @render.ui
     def top_risk_ui():
-        _, li = active_layer()
+        li = RISK_LAYERS[input.risk_layer()]
         return ui.HTML(_top_risk_html(composite_data(), li))
 
     # ---- Trend ---------------------------------------------------------------
 
     @render.ui
     def trend_ui():
-        layer, li = active_layer()
+        layer = input.risk_layer()
         return ui.HTML(_trend_html(
-            selected_cd(), layer, li, str(selected_date()), trend_days=30,
+            selected_cd(), layer, RISK_LAYERS[layer], str(selected_date()), trend_days=30,
         ))
 
     # ---- Legend --------------------------------------------------------------
 
     @render.ui
     def legend_ui():
-        _, li = active_layer()
-        return ui.HTML(_legend_html(li))
+        return ui.HTML(_legend_html(RISK_LAYERS[input.risk_layer()]))
 
     # ---- AI Summary tab ------------------------------------------------------
 
