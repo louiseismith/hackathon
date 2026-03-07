@@ -793,7 +793,7 @@ button#prompt4:hover, button#prompt5:hover {
     background: transparent !important;
 }
 
-/* Map container: fills viewport, slight inset so bottom edge is never clipped */
+/* Map container: fills viewport, padding on top/right/bottom like overlay spacing */
 .map-container {
     position: relative;
     width: 100%;
@@ -801,13 +801,14 @@ button#prompt4:hover, button#prompt5:hover {
     overflow: hidden;
     border-radius: 8px;
 }
-/* Iframe absolutely fills the container — bypasses all Shiny output wrapper divs */
+/* Iframe fills container with bottom inset to match top/right padding */
 .map-container iframe {
     position: absolute !important;
     top: 0 !important;
     left: 0 !important;
-    width: 100% !important;
-    height: 100% !important;
+    width: 100% !important; 
+    height: 94% !important;
+    bottom: 6px !important;
     border: none !important;
     z-index: 1;
 }
@@ -988,13 +989,13 @@ button#prompt4:hover, button#prompt5:hover {
     border: 1px solid rgba(255,255,255,0.4);
 }
 
-/* Legend: bottom right, above leaflet attribution */
-.overlay-legend { position: absolute; bottom: 20px; right: 12px; z-index: 10; }
+/* Legend: bottom right, moved up to stay within map */
+.overlay-legend { position: absolute; bottom: 56px; right: 12px; z-index: 10; }
 
-/* Bottom row: Top Communities + Trend side by side, compact, no overlap */
+/* Bottom row: Top Communities + Trend — moved up to stay within map */
 .overlay-bottom-row {
     position: absolute;
-    bottom: 12px;
+    bottom: 50px;
     left: 12px;
     z-index: 10;
     display: flex;
