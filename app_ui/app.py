@@ -1,20 +1,35 @@
 """
-app_ui/app.py — Python UI for NYC Urban Risk Early Warning System.
-Run with: streamlit run app.py (from app_ui folder) or streamlit run app_ui/app.py (from hackathon).
+app_ui/app.py — Shiny for Python: NYC Urban Risk Early Warning System
+Run from hackathon root: shiny run app_ui/app.py
 """
 
-import os
 import sys
+import json
+import io
+import base64
+import copy
+import calendar
 from pathlib import Path
 
-# Add hackathon/app to path so we can import backend and chatbot (avoid naming conflict with this file app.py)
-APP_UI_DIR = Path(__file__).resolve().parent
+import pandas as pd
+import numpy as np
+import folium
+from folium import Element
+from shapely.geometry import shape, mapping
+from shapely.ops import unary_union
+
+# ---------------------------------------------------------------------------
+# Path setup
+# ---------------------------------------------------------------------------
+
+APP_UI_DIR     = Path(__file__).resolve().parent
 HACKATHON_ROOT = APP_UI_DIR.parent
-APP_DIR = HACKATHON_ROOT / "app"
+APP_DIR        = HACKATHON_ROOT / "app"
+WWW_DIR        = APP_UI_DIR / "www"
+WWW_DIR.mkdir(exist_ok=True)
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-# Load .env from hackathon or parent 5381
 for env_dir in (HACKATHON_ROOT, HACKATHON_ROOT.parent):
     env_file = env_dir / ".env"
     if env_file.exists():
@@ -22,24 +37,14 @@ for env_dir in (HACKATHON_ROOT, HACKATHON_ROOT.parent):
         load_dotenv(env_file)
         break
 
-import base64
-import io
-import re
-import streamlit as st
-import pandas as pd
-import numpy as np
-import streamlit.components.v1 as components
-import json
-
-try:
-    import pydeck as pdk
-except ModuleNotFoundError:
-    pdk = None
-
+from shiny import App, ui, render, reactive
 from backend import get_risk_data, get_date_range, get_risk_series, borocd_to_cd_id
 from chatbot.agent import run_chat
 
-# Paths relative to hackathon
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
 GEOJSON_PATH = APP_DIR / "nyc_cd_boundaries.geojson"
 CD_META_PATH = HACKATHON_ROOT / "data" / "community_districts.csv"
 
@@ -47,7 +52,7 @@ RISK_LAYERS = {
     "heat_index_risk":     {"label": "Heat Index",        "col": "heat_index_risk",     "domain": (0, 80),   "unit": "/ 100"},
     "total_capacity_pct":  {"label": "Hospital Capacity", "col": "total_capacity_pct",  "domain": (50, 100), "unit": "%"},
     "transit_delay_index": {"label": "Transit Index",     "col": "transit_delay_index", "domain": (0, 60),   "unit": ""},
-    "composite":           {"label": "Composite Score",   "col": "composite",           "domain": (0, 100), "unit": "/ 100"},
+    "composite":           {"label": "Composite Score",   "col": "composite",           "domain": (0, 100),  "unit": "/ 100"},
 }
 METRICS = {
     "heat_index_risk":     {"label": "Heat Index Risk",     "col": "heat_index_risk",     "domain": (0, 80)},
@@ -55,693 +60,957 @@ METRICS = {
     "transit_delay_index": {"label": "Transit Delay Index", "col": "transit_delay_index", "domain": (0, 60)},
 }
 
+BOROUGH_COLORS = {
+    "Manhattan":     "#3b82f6",  # blue
+    "Brooklyn":      "#f97316",  # orange
+    "Queens":        "#a855f7",  # purple
+    "Bronx":         "#10b981",  # green
+    "Staten Island": "#06b6d4",  # cyan
+}
 
-@st.cache_data(show_spinner=False)
-def load_boundaries():
-    """Load GeoJSON and attach cd_id, borough, neighborhood. Cached so type-ahead stays fast."""
+_MNAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+]
+
+# ---------------------------------------------------------------------------
+# Startup data (module level — runs once on server start)
+# ---------------------------------------------------------------------------
+
+def _load_boundaries():
     with open(GEOJSON_PATH, encoding="utf-8") as f:
         gj = json.load(f)
     for feat in gj.get("features", []):
         props = feat.setdefault("properties", {})
         bcd = props.get("BoroCD")
-        if bcd is not None:
-            props["cd_id"] = borocd_to_cd_id(int(bcd)) or ""
-        else:
-            props["cd_id"] = ""
+        props["cd_id"] = (borocd_to_cd_id(int(bcd)) or "") if bcd is not None else ""
     if CD_META_PATH.exists():
-        cd_meta = pd.read_csv(CD_META_PATH)
-        meta_by_cd = cd_meta.set_index("cd_id").to_dict("index")
+        meta = pd.read_csv(CD_META_PATH).set_index("cd_id").to_dict("index")
         for feat in gj.get("features", []):
-            cd_id = feat["properties"].get("cd_id")
-            if cd_id and cd_id in meta_by_cd:
-                feat["properties"]["borough"] = meta_by_cd[cd_id].get("borough", "")
-                feat["properties"]["neighborhood"] = meta_by_cd[cd_id].get("neighborhood", cd_id)
-            else:
-                feat["properties"]["borough"] = feat["properties"].get("borough", "")
-                feat["properties"]["neighborhood"] = feat["properties"].get("neighborhood", cd_id or "")
+            cd_id = feat["properties"].get("cd_id", "")
+            m = meta.get(cd_id, {})
+            feat["properties"]["borough"]      = m.get("borough", "")
+            feat["properties"]["neighborhood"] = m.get("neighborhood", cd_id)
     else:
         for feat in gj.get("features", []):
-            feat["properties"]["borough"] = feat["properties"].get("borough", "")
-            feat["properties"]["neighborhood"] = feat["properties"].get("neighborhood", feat["properties"].get("cd_id", ""))
+            p = feat["properties"]
+            p.setdefault("borough", "")
+            p.setdefault("neighborhood", p.get("cd_id", ""))
     return gj
 
 
+BOUNDARIES = _load_boundaries()
+
+CD_LOOKUP = pd.DataFrame([
+    {
+        "cd_id":        f["properties"]["cd_id"],
+        "borough":      f["properties"].get("borough", ""),
+        "neighborhood": f["properties"].get("neighborhood", f["properties"]["cd_id"]),
+    }
+    for f in BOUNDARIES["features"] if f["properties"].get("cd_id")
+])
+
+_dr        = get_date_range()
+DATE_MIN   = pd.to_datetime(_dr["min"]).date()
+DATE_MAX   = pd.to_datetime(_dr["max"]).date()
+_dseq      = pd.date_range(DATE_MIN, DATE_MAX, freq="D")
+MONTHS_ORD = [_MNAMES[m - 1] for m in sorted(_dseq.month.unique())]
+YEARS_ORD  = [str(y) for y in sorted(_dseq.year.unique().tolist())]
+
+# ---------------------------------------------------------------------------
+# Pure helpers
+# ---------------------------------------------------------------------------
+
 def normalize_metric(vals, domain):
-    lo, hi = domain[0], domain[1]
+    lo, hi = domain
     if hi <= lo:
         return [0.0] * len(vals)
-    arr = pd.Series(vals).astype(float)
-    return (np.clip((arr - lo) / (hi - lo) * 100, 0, 100)).tolist()
+    return np.clip((pd.Series(vals).astype(float) - lo) / (hi - lo) * 100, 0, 100).tolist()
 
 
-# Risk colors for map (same as plan: green -> yellow -> orange -> red)
-def _display_val_to_hex(v):
+def _val_color(v):
+    """Map a 0-100 display value to a fill color for the choropleth."""
     if v is None:
         return "#cccccc"
-    if v <= 25:
-        return "#2ecc71"
-    if v <= 50:
-        return "#f1c40f"
-    if v <= 75:
-        return "#e67e22"
+    v = float(v)
+    if v <= 25: return "#2ecc71"
+    if v <= 50: return "#f1c40f"
+    if v <= 75: return "#e67e22"
     return "#e74c3c"
 
 
-def _hex_to_rgb(hex_str):
-    """Convert hex color to [r, g, b] for deck.gl."""
-    h = hex_str.lstrip("#")
-    return [int(h[i : i + 2], 16) for i in (0, 2, 4)]
-
-
-def _build_deck_risk_map(boundaries, layer_label, height_px=650):
-    """Build a deck.gl map of NYC CDs colored by risk (like energy-burden). Returns HTML string for iframe embed."""
-    if pdk is None:
-        return """
-<!doctype html>
-<html><body style="font-family:system-ui;padding:12px;color:#374151;">
-<div style="font-weight:600;margin-bottom:6px;">Map dependency missing</div>
-<div>Install <code>pydeck</code>: <code>pip install pydeck</code></div>
-</body></html>
-"""
-    # Copy and add color_rgba to each feature for GeoJsonLayer
-    import copy
-    gj = copy.deepcopy(boundaries)
-    for feat in gj.get("features", []):
-        props = feat.setdefault("properties", {})
-        v = props.get("_display_val")
-        hex_color = _display_val_to_hex(v)
-        props["color_rgba"] = _hex_to_rgb(hex_color) + [192]  # alpha for fill
-        # Format for tooltip
-        props["_display_val_fmt"] = f"{v:.1f}" if v is not None else "N/A"
-    geojson_data = gj
-
-    layer = pdk.Layer(
-        "GeoJsonLayer",
-        data=geojson_data,
-        get_fill_color="[properties.color_rgba[0], properties.color_rgba[1], properties.color_rgba[2], properties.color_rgba[3]]",
-        get_line_color=[255, 255, 255],
-        line_width_min_pixels=1,
-        filled=True,
-        stroked=True,
-        opacity=0.85,
-        pickable=True,
-        auto_highlight=True,
-    )
-    tooltip = {
-        "html": (
-            "<b>Neighborhood:</b> {neighborhood}<br/>"
-            "<b>CD:</b> {cd_id}<br/>"
-            f"<b>{layer_label}:</b> {{_display_val_fmt}}"
-        ),
-        "style": {
-            "backgroundColor": "#fff",
-            "color": "#374151",
-            "padding": "10px",
-            "fontFamily": "system-ui, sans-serif",
-        },
-    }
-    deck = pdk.Deck(
-        layers=[layer],
-        initial_view_state=pdk.ViewState(
-            latitude=40.73,
-            longitude=-73.98,
-            zoom=11,
-            pitch=0,
-            bearing=0,
-        ),
-        map_style="https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-        tooltip=tooltip,
-        height=height_px,
-    )
-    return deck.to_html(as_string=True)
-
-
-def _prepare_pydeck_html_for_embed(map_html, height_px=650):
-    """Ensure pydeck HTML fills iframe and inject click handler so selecting a district updates the app."""
-    embed_css = f"html,body{{height:{height_px}px;margin:0;overflow:hidden;}}"
-    if "</head>" in map_html:
-        map_html = map_html.replace("</head>", f"<style>{embed_css}</style></head>", 1)
-    # Inject script: on district click, set parent URL to ?cd_id=... so Streamlit can set selected_cd
-    click_script = """
-<script>
-(function() {
-  function attachClick() {
-    if (typeof deck === 'undefined' || !deck.on) return false;
-    deck.on('click', function(evt) {
-      if (evt.object && evt.object.properties) {
-        var p = evt.object.properties;
-        var base = window.parent.location.pathname || '/';
-        var q = '?cd_id=' + encodeURIComponent(p.cd_id || '') + '&borough=' + encodeURIComponent(p.borough || '') + '&neighborhood=' + encodeURIComponent(p.neighborhood || '');
-        window.parent.location = base + q;
-      }
-    });
-    return true;
-  }
-  if (attachClick()) return;
-  var tries = 0;
-  var t = setInterval(function() {
-    if (attachClick() || ++tries > 80) clearInterval(t);
-  }, 100);
-})();
-</script>
-"""
-    if "</body>" in map_html:
-        map_html = map_html.replace("</body>", click_script + "\n</body>", 1)
-    return map_html
-
-
-def _risk_to_dot_color(risk_0_100):
-    """Return hex color for indicator dot: red (high), orange (mid), green (low)."""
-    if risk_0_100 is None:
-        return "#94a3b8"
-    if risk_0_100 >= 66:
-        return "#e74c3c"
-    if risk_0_100 >= 33:
-        return "#f39c12"
+def _dot_color(risk):
+    """Map a 0-100 risk level to a status dot color."""
+    if risk is None: return "#94a3b8"
+    if risk >= 66:   return "#e74c3c"
+    if risk >= 33:   return "#f39c12"
     return "#2ecc71"
 
 
-def _build_stats_card_html(selected_cd, risk_df):
-    """Build the Statistics card overlay to match UI mockup: transparent card with district name,
-    borough | CD id, phone/menu icons, then metrics with colored dots and values. Populates for
-    whatever community district the user selects (via search)."""
-    card_style = (
-        "border-radius: 12px; background: rgba(255, 255, 255, 0.75); "
-        "backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); "
-        "box-shadow: 0 2px 16px rgba(0,0,0,0.08); padding: 14px 16px; "
-        "font-family: system-ui, -apple-system, sans-serif; font-size: 14px; "
-        "border: 1px solid rgba(255,255,255,0.5); min-width: 240px; max-width: 300px;"
+def _esc(s):
+    if s is None: return ""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+# ---------------------------------------------------------------------------
+# Folium map builder
+# ---------------------------------------------------------------------------
+
+# Injected into every folium map: on polygon click, fire Shiny.setInputValue
+# on the parent window (the Shiny app page — one level up from the srcdoc iframe).
+_CLICK_JS = """<script>
+(function () {
+  function attach() {
+    var mapObj = null;
+    Object.keys(window).forEach(function (k) {
+      if (/^map_[a-z0-9]+$/.test(k) && window[k] && window[k].eachLayer)
+        mapObj = window[k];
+    });
+    if (!mapObj) return false;
+    var found = 0;
+    mapObj.eachLayer(function (layer) {
+      if (!layer.eachLayer) return;
+      layer.eachLayer(function (sub) {
+        sub.on("click", function (e) {
+          var p = e.target.feature && e.target.feature.properties;
+          if (!p) return;
+          try {
+            window.parent.Shiny.setInputValue(
+              "map_click",
+              {
+                cd_id:        p.cd_id        || "",
+                borough:      p.borough      || "",
+                neighborhood: p.neighborhood || ""
+              },
+              { priority: "event" }
+            );
+          } catch (_) {}
+        });
+        found++;
+      });
+    });
+    return found > 0;
+  }
+  var tries = 0;
+  var t = setInterval(function () {
+    if (attach() || ++tries > 80) clearInterval(t);
+  }, 150);
+})();
+</script>"""
+
+
+def _build_borough_outlines(boundaries):
+    """Dissolve CD polygons by borough → GeoJSON FeatureCollection for outline layer."""
+    groups = {}
+    for feat in boundaries["features"]:
+        borough = feat["properties"].get("borough", "")
+        if not borough:
+            continue
+        geom = shape(feat["geometry"])
+        groups.setdefault(borough, []).append(geom)
+    features = []
+    for borough, geoms in groups.items():
+        dissolved = unary_union(geoms)
+        features.append({
+            "type": "Feature",
+            "properties": {"borough": borough},
+            "geometry": mapping(dissolved),
+        })
+    return {"type": "FeatureCollection", "features": features}
+
+
+def _build_folium_map(boundaries, risk_by_cd, layer_label):
+    m = folium.Map(
+        location=[40.73, -73.98],
+        zoom_start=11,
+        tiles="CartoDB positron",
+        prefer_canvas=True,
     )
-    if not selected_cd:
-        return f"""<div style="{card_style}">
-        <div style="font-size: 14px; font-weight: 700; color: #0f172a; margin-bottom: 8px;">Statistics</div>
-        <div style="font-size: 15px; font-weight: 600; color: #334155;">Select a district</div>
-        <div style="font-size: 12px; color: #64748b; margin-top: 2px;">Use search above or click a district on the map</div>
-        </div>"""
-    name = selected_cd.get("neighborhood") or selected_cd.get("cd_id") or "—"
-    borough = selected_cd.get("borough") or ""
-    cd_id = selected_cd.get("cd_id") or ""
-    sub = " | ".join(filter(None, [borough, cd_id]))
-    # Phone and menu icons (Unicode)
-    icons = "<span style='color:#94a3b8;font-size:14px;margin-left:6px;'>📞</span><span style='color:#94a3b8;font-size:14px;'>☰</span>"
-    header = f"""
-    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 8px;">
-        <div>
-            <div style="font-size: 20px; font-weight: 700; color: #0f172a;">{_escape_html(name)}</div>
-            <div style="font-size: 12px; color: #64748b; margin-top: 2px;">{_escape_html(sub)}</div>
-        </div>
-        <div style="flex-shrink: 0;">{icons}</div>
-    </div>"""
-    if risk_df is None or risk_df.empty:
-        return f"<div style='{card_style}'>{header}<div style='margin-top:12px;font-size:12px;color:#64748b;'>No data for this district</div></div>"
-    match = risk_df[risk_df["cd_id"] == cd_id]
-    if match.empty:
-        return f"<div style='{card_style}'>{header}<div style='margin-top:12px;font-size:12px;color:#64748b;'>No data for this district</div></div>"
-    row = match.iloc[0]
-    # Normalize each metric to 0-100 risk (higher = worse) for dot color
-    def norm_risk(col, domain, invert=False):
-        v = row.get(col)
-        if v is None or not pd.notna(v):
-            return None
-        lo, hi = domain[0], domain[1]
-        if hi <= lo:
-            return None
-        pct = (float(v) - lo) / (hi - lo) * 100
-        pct = max(0, min(100, pct))
-        return 100 - pct if invert else pct
-    # Composite
-    norms = []
-    for m in METRICS:
-        col = METRICS[m]["col"]
-        if col in row and pd.notna(row[col]):
-            v = float(row[col])
-            lo, hi = METRICS[m]["domain"][0], METRICS[m]["domain"][1]
-            if hi > lo:
-                n = max(0, min(100, (v - lo) / (hi - lo) * 100))
-                norms.append(n)
-    composite_val = round(sum(norms) / len(norms), 1) if norms else None
-    composite_risk = (sum(norms) / len(norms)) if norms else None
-    # Metrics: (label, value_fmt, risk_0_100 for dot). Hospital/ICU: high % = low risk
-    heat_v = row.get("heat_index_risk")
-    heat_risk = norm_risk("heat_index_risk", (0, 80), invert=False)
-    hosp_v = row.get("total_capacity_pct")
-    hosp_risk = norm_risk("total_capacity_pct", (50, 100), invert=True)  # low capacity = high risk
-    icu_v = row.get("icu_capacity_pct")
-    icu_risk = norm_risk("icu_capacity_pct", (50, 100), invert=True)
-    ed_v = row.get("ed_wait_hours")
-    ed_risk = norm_risk("ed_wait_hours", (0, 24), invert=False) if ed_v is not None else None  # assume 0-24 hr range
-    if ed_risk is None and ed_v is not None:
-        ed_risk = min(100, float(ed_v) * 4)  # rough
-    transit_v = row.get("transit_delay_index")
-    transit_risk = norm_risk("transit_delay_index", (0, 60), invert=False)
-    metrics = [
-        ("Heat Index Risk", heat_v, "/ 100", heat_risk),
-        ("Hospital Capacity %", hosp_v, "%", hosp_risk),
-        ("ICU Capacity %", icu_v, "%", icu_risk),
-        ("ED Wait Hours", ed_v, " hrs", ed_risk),
-        ("Transit Delay Index", transit_v, "", transit_risk),
-    ]
-    lines = []
-    for label, val, unit, risk in metrics:
-        dot = _risk_to_dot_color(risk)
-        if val is not None and pd.notna(val):
-            v_fmt = f"{round(float(val), 1)}{unit}" if isinstance(val, (int, float)) else f"{val}{unit}"
-        else:
-            v_fmt = "—"
-        trend_icon = "<span style='color:#e74c3c;font-size:10px;'>▲</span>" if (risk is not None and risk >= 66) else "<span style='color:#94a3b8;font-size:10px;'>→</span>"
-        lines.append(f"""
-        <div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;">
-            <span style="width: 8px; height: 8px; border-radius: 50%; background: {dot}; flex-shrink: 0;"></span>
-            <span style="flex: 1;">{_escape_html(label)}</span>
-            <span style="color: #334155; font-weight: 500;">{_escape_html(str(v_fmt))}</span>
-            {trend_icon}
-        </div>""")
-    # Composite row at bottom with divider
-    comp_fmt = f"{composite_val}/ 100" if composite_val is not None else "—"
-    comp_dot = _risk_to_dot_color(composite_risk)
-    comp_icon = "<span style='color:#e74c3c;font-size:10px;'>▲</span>" if (composite_risk is not None and composite_risk >= 66) else "<span style='color:#94a3b8;font-size:10px;'>→</span>"
-    body = "".join(lines) + f"""
-        <div style="border-top: 1px solid rgba(0,0,0,0.08); margin-top: 12px; padding-top: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="width: 8px; height: 8px; border-radius: 50%; background: {comp_dot}; flex-shrink: 0;"></span>
-                <span style="flex: 1; font-weight: 600;">Composite Risk Score</span>
-                <span style="color: #334155; font-weight: 600;">{_escape_html(str(comp_fmt))}</span>
-                {comp_icon}
-            </div>
-        </div>"""
-    return f"<div style='{card_style}'>{header}<div style='margin-top: 12px;'>{body}</div></div>"
+    gj = copy.deepcopy(boundaries)
+    for feat in gj["features"]:
+        p   = feat["properties"]
+        val = risk_by_cd.get(p.get("cd_id"), None)
+        p["_v"]     = val
+        p["_vfmt"]  = f"{val:.1f}" if val is not None else "N/A"
+        p["_color"] = _val_color(val)
+
+    folium.GeoJson(
+        gj,
+        style_function=lambda f: {
+            "fillColor":   f["properties"]["_color"],
+            "fillOpacity": 0.75,
+            "color":       "white",
+            "weight":      1,
+        },
+        highlight_function=lambda f: {
+            "fillOpacity": 0.9,
+            "weight":      2,
+            "color":       "#333",
+        },
+        tooltip=folium.GeoJsonTooltip(
+            fields=["borough", "neighborhood", "cd_id", "_vfmt"],
+            aliases=["Borough:", "Community District:", "CD ID:", f"{layer_label}:"],
+            style="font-family:system-ui;font-size:13px;",
+        ),
+    ).add_to(m)
+
+    # Borough outline layer — each borough in its own color
+    borough_gj = _build_borough_outlines(boundaries)
+    folium.GeoJson(
+        borough_gj,
+        style_function=lambda f: {
+            "fillColor":   "none",
+            "fillOpacity": 0,
+            "color":       BOROUGH_COLORS.get(f["properties"].get("borough", ""), "#1e293b"),
+            "weight":      2.5,
+        },
+        interactive=False,
+    ).add_to(m)
+
+    m.get_root().html.add_child(Element(_CLICK_JS))
+    return m
 
 
-def _build_trend_html(selected_cd, risk_layer_key, layer_info, date_str, trend_days):
-    """Build overlay HTML for Trend: line chart of risk layer over time (matplotlib PNG base64) or placeholder."""
-    if not selected_cd:
-        return "<strong>Trend</strong><br/><span style='font-size: 12px; color: #666;'>Select a district for trend.</span>"
-    cd_id = selected_cd.get("cd_id")
-    if not cd_id:
-        return "<strong>Trend</strong><br/><span style='font-size: 12px; color: #666;'>Select a district for trend.</span>"
-    start_d = pd.Timestamp(date_str) - pd.Timedelta(days=int(trend_days) - 1)
-    start_str = start_d.strftime("%Y-%m-%d")
+# ---------------------------------------------------------------------------
+# Card / overlay HTML builders
+# ---------------------------------------------------------------------------
+
+_CARD_CSS = (
+    "border-radius:12px;"
+    "background:rgba(255,255,255,0.52);"
+    "backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);"
+    "box-shadow:0 2px 16px rgba(0,0,0,0.10);"
+    "padding:14px 16px;"
+    "font-family:system-ui,-apple-system,sans-serif;font-size:14px;"
+    "border:1px solid rgba(255,255,255,0.38);"
+    "min-width:240px;max-width:300px;"
+)
+
+_OVERLAY_CSS = (
+    "border-radius:10px;"
+    "background:rgba(255,255,255,0.52);"
+    "backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);"
+    "box-shadow:0 2px 12px rgba(0,0,0,0.08);"
+    "padding:12px 14px;"
+    "font-family:system-ui,-apple-system,sans-serif;font-size:13px;"
+    "border:1px solid rgba(255,255,255,0.38);"
+)
+
+
+def _trend_arrow(curr, prev, tol=0.1):
+    """Return (symbol, color) comparing curr vs prev value over 30 days.
+    Green ▲ = increased, Red ▼ = decreased, Yellow → = no change."""
+    if curr is None or prev is None:
+        return "→", "#94a3b8"
     try:
-        series = get_risk_series(cd_id, start_str, date_str)
+        delta = float(curr) - float(prev)
+    except (TypeError, ValueError):
+        return "→", "#94a3b8"
+    if delta > tol:
+        return "▲", "#22c55e"   # green — increased
+    if delta < -tol:
+        return "▼", "#e74c3c"   # red — decreased
+    return "→", "#f59e0b"       # yellow — no change
+
+
+def _stats_card_html(sc, risk_df, prev_df=None):
+    if not sc:
+        return (
+            f'<div style="{_CARD_CSS}">'
+            '<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:8px;">Statistics</div>'
+            '<div style="font-size:13px;color:#64748b;">Select a district on the map or use search.</div>'
+            '</div>'
+        )
+
+    name  = _esc(sc.get("neighborhood") or sc.get("cd_id") or "—")
+    sub   = _esc(" | ".join(filter(None, [sc.get("borough", ""), sc.get("cd_id", "")])))
+    cd_id = sc.get("cd_id", "")
+
+    header = (
+        f'<div style="margin-bottom:4px;">'
+        f'  <div style="font-size:20px;font-weight:700;color:#0f172a;">{name}</div>'
+        f'  <div style="font-size:12px;color:#64748b;margin-top:2px;">{sub}</div>'
+        f'</div>'
+    )
+
+    if risk_df is None or risk_df.empty:
+        return (
+            f'<div style="{_CARD_CSS}">{header}'
+            f'<div style="margin-top:10px;font-size:12px;color:#64748b;">No data for this district.</div>'
+            f'</div>'
+        )
+
+    row = risk_df[risk_df["cd_id"] == cd_id]
+    if row.empty:
+        return (
+            f'<div style="{_CARD_CSS}">{header}'
+            f'<div style="margin-top:10px;font-size:12px;color:#64748b;">No data for this district.</div>'
+            f'</div>'
+        )
+
+    r = row.iloc[0]
+
+    # Previous row (30 days ago) for the same CD
+    prev_r = None
+    if prev_df is not None and not prev_df.empty:
+        prev_row = prev_df[prev_df["cd_id"] == cd_id]
+        if not prev_row.empty:
+            prev_r = prev_row.iloc[0]
+
+    def norm_val(v, domain):
+        if v is None or not pd.notna(v): return None
+        lo, hi = domain
+        if hi <= lo: return None
+        return max(0.0, min(100.0, (float(v) - lo) / (hi - lo) * 100))
+
+    # Composite (average of the three map metrics)
+    norms = [n for n in (norm_val(r.get(mv["col"]), mv["domain"]) for mv in METRICS.values()) if n is not None]
+    composite_val  = round(sum(norms) / len(norms), 1) if norms else None
+    composite_risk = sum(norms) / len(norms) if norms else None
+
+    # Previous composite
+    prev_composite = None
+    if prev_r is not None:
+        p_norms = [n for n in (norm_val(prev_r.get(mv["col"]), mv["domain"]) for mv in METRICS.values()) if n is not None]
+        prev_composite = sum(p_norms) / len(p_norms) if p_norms else None
+
+    stat_rows = [
+        ("Heat Index Risk",     "heat_index_risk",     r.get("heat_index_risk"),     "/ 100", norm_val(r.get("heat_index_risk"),     (0, 80))),
+        ("Hospital Capacity %", "total_capacity_pct",  r.get("total_capacity_pct"),  "%",     norm_val(r.get("total_capacity_pct"),  (50, 100))),
+        ("ICU Capacity %",      "icu_capacity_pct",    r.get("icu_capacity_pct"),    "%",     norm_val(r.get("icu_capacity_pct"),    (50, 100))),
+        ("ED Wait Hours",       "ed_wait_hours",       r.get("ed_wait_hours"),       " hrs",  norm_val(r.get("ed_wait_hours"),       (0, 24))),
+        ("Transit Delay Index", "transit_delay_index", r.get("transit_delay_index"), "",      norm_val(r.get("transit_delay_index"), (0, 60))),
+    ]
+
+    rows_html = ""
+    for label, col, val, unit, risk in stat_rows:
+        dot  = _dot_color(risk)
+        vfmt = f"{round(float(val), 1)}{unit}" if (val is not None and pd.notna(val)) else "—"
+        prev_val = prev_r.get(col) if prev_r is not None else None
+        arrow, ac = _trend_arrow(val, prev_val)
+        rows_html += (
+            f'<div style="display:flex;align-items:center;gap:8px;margin-top:9px;">'
+            f'  <span style="width:8px;height:8px;border-radius:50%;background:{dot};flex-shrink:0;"></span>'
+            f'  <span style="flex:1;color:#334155;">{_esc(label)}</span>'
+            f'  <span style="font-weight:500;color:#0f172a;">{_esc(vfmt)}</span>'
+            f'  <span style="font-size:11px;color:{ac};font-weight:600;">{arrow}</span>'
+            f'</div>'
+        )
+
+    comp_dot              = _dot_color(composite_risk)
+    comp_fmt              = f"{composite_val} / 100" if composite_val is not None else "—"
+    comp_arrow, comp_ac   = _trend_arrow(composite_val, prev_composite, tol=0.5)
+    comp_row = (
+        f'<div style="border-top:1px solid rgba(0,0,0,0.08);margin-top:12px;padding-top:10px;">'
+        f'  <div style="display:flex;align-items:center;gap:8px;">'
+        f'    <span style="width:8px;height:8px;border-radius:50%;background:{comp_dot};flex-shrink:0;"></span>'
+        f'    <span style="flex:1;font-weight:600;color:#0f172a;">Composite Risk Score</span>'
+        f'    <span style="font-weight:600;color:#0f172a;">{_esc(comp_fmt)}</span>'
+        f'    <span style="font-size:11px;color:{comp_ac};font-weight:600;">{comp_arrow}</span>'
+        f'  </div>'
+        f'</div>'
+    )
+
+    return (
+        f'<div style="{_CARD_CSS}">'
+        f'{header}'
+        f'<div style="margin-top:10px;">{rows_html}{comp_row}</div>'
+        f'</div>'
+    )
+
+
+def _top_risk_html(risk_df, layer_info):
+    hdr = '<div style="font-weight:700;color:#0f172a;margin-bottom:8px;">Top Communities At Risk</div>'
+    if risk_df is None or risk_df.empty or "display_val" not in risk_df.columns:
+        return (
+            f'<div style="{_OVERLAY_CSS}">{hdr}'
+            f'<div style="color:#64748b;font-size:12px;">No data.</div></div>'
+        )
+
+    top  = risk_df.nlargest(5, "display_val")
+    unit = layer_info.get("unit", "")
+    metric_lbl = layer_info["label"]
+    rows = ""
+    for _, r in top.iterrows():
+        name = _esc((r.get("neighborhood") or "") + "  " + (r.get("cd_id") or ""))
+        val  = r.get("display_val")
+        vstr = f"{round(float(val), 1)}{unit}" if pd.notna(val) else "—"
+        dot  = _dot_color(float(val) if pd.notna(val) else None)
+        rows += (
+            f'<tr>'
+            f'<td style="padding:4px 6px;">'
+            f'  <span style="width:7px;height:7px;border-radius:50%;background:{dot};'
+            f'  display:inline-block;margin-right:5px;vertical-align:middle;"></span>'
+            f'  {name}</td>'
+            f'<td style="padding:4px 6px;font-weight:500;text-align:right;">{_esc(vstr)}</td>'
+            f'</tr>'
+        )
+
+    return (
+        f'<div style="{_OVERLAY_CSS}">'
+        f'{hdr}'
+        f'<table style="width:100%;border-collapse:collapse;">'
+        f'<thead><tr style="border-bottom:1px solid #e2e8f0;">'
+        f'  <th style="text-align:left;padding:4px 6px;font-weight:600;color:#475569;font-size:12px;">Name</th>'
+        f'  <th style="text-align:right;padding:4px 6px;font-weight:600;color:#475569;font-size:12px;">{_esc(metric_lbl)}</th>'
+        f'</tr></thead>'
+        f'<tbody>{rows}</tbody>'
+        f'</table></div>'
+    )
+
+
+def _trend_html(sc, risk_layer, layer_info, date_str, trend_days=30):
+    hdr = (
+        f'<div style="font-weight:700;color:#0f172a;margin-bottom:6px;">'
+        f'Trend '
+        f'<span style="font-weight:400;color:#64748b;font-size:11px;">(Past {trend_days} days)</span>'
+        f'</div>'
+    )
+    if not sc or not sc.get("cd_id"):
+        return (
+            f'<div style="{_OVERLAY_CSS}">{hdr}'
+            f'<div style="color:#64748b;font-size:12px;">Select a district to see trend.</div></div>'
+        )
+
+    start_d = (pd.Timestamp(date_str) - pd.Timedelta(days=int(trend_days) - 1)).strftime("%Y-%m-%d")
+    try:
+        series = get_risk_series(sc["cd_id"], start_d, date_str)
     except Exception:
-        return "<strong>Trend</strong><br/><span style='font-size: 12px; color: #666;'>Trend unavailable.</span>"
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">Trend unavailable.</div></div>'
     if not series:
-        return "<strong>Trend</strong><br/><span style='font-size: 12px; color: #666;'>No trend data for this range.</span>"
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">No data for this range.</div></div>'
+
     try:
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
     except ModuleNotFoundError:
-        return "<strong>Trend</strong><br/><span style='font-size: 12px; color: #666;'>Install matplotlib for trend chart.</span>"
+        return f'<div style="{_OVERLAY_CSS}">{hdr}<div style="color:#64748b;font-size:12px;">Install matplotlib for trend chart.</div></div>'
+
     sdf = pd.DataFrame(series)
-    if risk_layer_key == "composite":
-        for m in METRICS:
-            sdf[m + "_n"] = normalize_metric(sdf[METRICS[m]["col"]].tolist(), METRICS[m]["domain"])
-        sdf["display_val"] = sdf[[m + "_n" for m in METRICS]].mean(axis=1)
+    if risk_layer == "composite":
+        for mk, mv in METRICS.items():
+            sdf[mk + "_n"] = normalize_metric(sdf[mv["col"]].tolist(), mv["domain"])
+        sdf["display_val"] = sdf[[mk + "_n" for mk in METRICS]].mean(axis=1)
     else:
         sdf["display_val"] = sdf[layer_info["col"]]
     sdf["date"] = pd.to_datetime(sdf["date"])
-    fig, ax = plt.subplots(figsize=(3.2, 1.8), dpi=100)
-    ax.plot(sdf["date"], sdf["display_val"], color="steelblue", linewidth=1.5)
+
+    fig, ax = plt.subplots(figsize=(3.0, 1.6), dpi=100)
+    ax.plot(sdf["date"], sdf["display_val"], color="#e74c3c", linewidth=1.5)
+    ax.fill_between(sdf["date"], sdf["display_val"], alpha=0.12, color="#e74c3c")
+    ax.tick_params(labelsize=8)
     ax.set_xlabel("")
-    ax.set_ylabel(layer_info["label"], fontsize=9)
-    ax.tick_params(axis="both", labelsize=8)
+    ax.set_ylabel(layer_info["label"], fontsize=8)
     fig.autofmt_xdate()
-    ax.set_title("", fontsize=10)
+    plt.tight_layout(pad=0.4)
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=(1, 1, 1, 0.9))
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=(1, 1, 1, 0))
     plt.close(fig)
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode()
-    return f"<strong>Trend</strong> <span style='font-size: 11px; color: #666;'>(Past {trend_days} days)</span><br/><img src='data:image/png;base64,{b64}' style='width: 100%; height: auto; margin-top: 4px;' alt='Trend'/>"
 
-
-def _build_top_risk_html(risk_df, layer_info):
-    """Build overlay HTML for Top Communities At Risk: table with Name, Risk Type, Desired Metric (top 10)."""
-    if risk_df is None or risk_df.empty or "display_val" not in risk_df.columns:
-        return "<strong>Top Communities At Risk</strong><br/><span style='font-size: 12px; color: #666;'>No risk data for selected date.</span>"
-    top = risk_df.nlargest(10, "display_val")
-    risk_label = layer_info["label"]
-    unit = layer_info.get("unit") or ""
-    rows = []
-    for _, r in top.iterrows():
-        name = _escape_html((r.get("neighborhood") or "") + " " + (r.get("cd_id") or ""))
-        val = r.get("display_val")
-        if pd.notna(val):
-            desired = f"{round(float(val), 1)}{unit}"
-        else:
-            desired = "—"
-        rows.append(f"<tr><td style='padding: 4px 8px;'>{name}</td><td style='padding: 4px 8px;'>{_escape_html(risk_label)}</td><td style='padding: 4px 8px;'>{_escape_html(desired)}</td></tr>")
-    table_body = "".join(rows)
-    return f"""
-    <strong>Top Communities At Risk</strong>
-    <table style='width: 100%; margin-top: 8px; font-size: 13px; border-collapse: collapse;'>
-        <thead><tr style='border-bottom: 1px solid #e2e8f0;'>
-            <th style='text-align: left; padding: 6px 8px;'>Name</th>
-            <th style='text-align: left; padding: 6px 8px;'>Risk Type</th>
-            <th style='text-align: left; padding: 6px 8px;'>Desired Metric</th>
-        </tr></thead>
-        <tbody>{table_body}</tbody>
-    </table>
-    """
-
-
-def _escape_html(s):
-    """Escape string for safe use in HTML."""
-    if s is None:
-        return ""
-    s = str(s)
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
-
-
-def _prepare_folium_html_for_embed(map_html, height_px=650):
-    """Prepare Folium HTML for iframe embed: set explicit height so map renders (avoids 'Trust Notebook' / Branca height=None)."""
-    # Strip Jupyter/Branca trust message if present (so it never shows in Streamlit)
-    for phrase in ("Make this Notebook Trusted", "Trust Notebook", "File -> Trust Notebook"):
-        map_html = map_html.replace(phrase, "")
-    # Inject CSS so html/body and map container have explicit height (fixes Branca height=None in iframe)
-    embed_css = f"html,body{{height:{height_px}px;margin:0;overflow:hidden;}}"
-    if "</head>" in map_html:
-        map_html = map_html.replace("</head>", f"<style>{embed_css}</style></head>", 1)
-    else:
-        map_html = map_html.replace("<body>", f"<head><style>{embed_css}</style></head><body>", 1)
-    # Ensure Folium's root map div has pixel height (100% may not resolve in iframe)
-    map_html = map_html.replace('style="width: 100%; height: 100%;"', f'style="width: 100%; height: {height_px}px;"', 1)
-    if 'height: 100%;' in map_html and f'height: {height_px}px' not in map_html:
-        map_html = map_html.replace("height: 100%;", f"height: {height_px}px;", 1)
-    return map_html
-
-
-def _build_map_dashboard_html(map_html, stats_card_html, top_risk_html, trend_html, map_is_pydeck=True):
-    """Build one HTML block: wrapper div with map (iframe) + overlay divs (identity, stats, table, trend)."""
-    # Prepare map HTML for iframe (explicit height so map renders)
-    if map_is_pydeck:
-        map_html = _prepare_pydeck_html_for_embed(map_html, height_px=650)
-    else:
-        map_html = _prepare_folium_html_for_embed(map_html, height_px=650)
-    # Escape map_html for embedding in srcdoc
-    map_srcdoc = map_html.replace("'", "&#39;").replace('"', "&quot;")
-    overlay_style = (
-        "z-index: 10; border-radius: 10px; background: rgba(255,255,255,0.92); "
-        "box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 12px; "
-        "font-family: system-ui, -apple-system, sans-serif; font-size: 14px; border: 1px solid rgba(0,0,0,0.06);"
-    )
-    # Full document so iframe body has no margin/padding and map fills the square; overlays on top
-    map_wrapper = f"""
-    <div style="position: relative; width: 100%; height: 650px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.08); background: #e2e8f0; border: 1px solid rgba(0,0,0,0.06); margin: 0; padding: 0; box-sizing: border-box;">
-        <iframe srcdoc="{map_srcdoc}" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: none; border-radius: 8px; z-index: 1;" title="NYC Risk Map"></iframe>
-        <div style="position: absolute; top: 12px; right: 12px; z-index: 10;">
-            {stats_card_html}
-        </div>
-        <div style="position: absolute; bottom: 12px; left: 12px; max-width: 380px; max-height: 220px; overflow-y: auto; {overlay_style}">
-            {top_risk_html}
-        </div>
-        <div style="position: absolute; bottom: 12px; right: 12px; width: 320px; height: 200px; {overlay_style}">
-            {trend_html}
-        </div>
-    </div>
-    """
     return (
-        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
-        "<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;}</style></head><body>"
-        + map_wrapper +
-        "</body></html>"
+        f'<div style="{_OVERLAY_CSS}">'
+        f'{hdr}'
+        f'<img src="data:image/png;base64,{b64}" style="width:100%;height:auto;" alt="Trend"/>'
+        f'</div>'
     )
 
 
-def _inject_dashboard_css():
-    """Inject CSS for page background, control bar, and typography. Sidebar uses Streamlit default (drag + collapse arrow)."""
-    st.markdown(
-        """
-        <style>
-        /* Page background: clear gradient */
-        .stApp, [data-testid="stAppViewContainer"], .main {
-            background: linear-gradient(165deg, #f0f4f8 0%, #e2e8f0 50%, #cbd5e1 100%) !important;
-        }
-        /* Main: no padding so map can fill the square to the right of sidebar */
-        [data-testid="stAppViewContainer"] { padding: 0 !important; }
-        .main { padding: 0 !important; max-width: none !important; }
-        .main .block-container {
-            padding-top: 0.5rem;
-            padding-left: 0.5rem;
-            padding-right: 0.5rem;
-            padding-bottom: 0 !important;
-            max-width: none !important;
-            width: 100%;
-        }
-        /* Map block (2nd: control bar, then map): no margin/padding so map fills area */
-        .main .block-container > div:nth-child(2) {
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
-            max-width: none !important;
-        }
-        .main .block-container > div:nth-child(2) iframe {
-            display: block !important;
-            width: 100% !important;
-        }
-        /* Top control bar: frosted, skinnier (match inspiration) */
-        .main .block-container > div:first-child {
-            border-radius: 12px;
-            background: rgba(255, 255, 255, 0.88);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.05);
-            padding: 0.4rem 1rem;
-            margin-bottom: 0.5rem;
-            border: 1px solid rgba(255, 255, 255, 0.6);
-        }
-        /* Streamlit widget labels in control bar */
-        .main .block-container > div:first-child label {
-            font-weight: 500;
-            color: #475569;
-        }
-        /* Skinnier: white inputs and selectboxes (reduced height/padding) */
-        .main .block-container > div:first-child input, .main .block-container > div:first-child [data-baseweb="select"] {
-            background: #fff !important;
-            border-radius: 8px;
-            border: 1px solid #e2e8f0;
-            min-height: 32px !important;
-            padding: 4px 10px !important;
-            font-size: 0.8125rem !important;
-        }
-        .main .block-container > div:first-child [data-baseweb="select"] > div {
-            min-height: 32px !important;
-            padding: 4px 10px !important;
-        }
-        /* Search button: force blue (Streamlit primary is red; target only last column button) */
-        .main .block-container > div:first-child div[data-testid="column"]:last-child button,
-        .main .block-container > div:first-child button[kind="primary"] {
-            background-color: #2563eb !important;
-            background: #2563eb !important;
-            color: #fff !important;
-            border: none !important;
-            border-radius: 8px;
-            font-weight: 500;
-            min-height: 32px !important;
-            padding: 4px 14px !important;
-            font-size: 0.8125rem !important;
-        }
-        .main .block-container > div:first-child div[data-testid="column"]:last-child button:hover,
-        .main .block-container > div:first-child button[kind="primary"]:hover {
-            background-color: #1d4ed8 !important;
-            background: #1d4ed8 !important;
-            color: #fff !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
+def _legend_html(layer_info):
+    """Compact floating legend: continuous gradient bar from green → red."""
+    lo, hi = layer_info["domain"]
+    unit   = layer_info.get("unit", "").strip()
+    label  = layer_info["label"]
+
+    def fmt(v):
+        s = str(int(round(v)))
+        return s + unit if unit and unit != "/ 100" else s
+
+    lo_lbl = fmt(lo)
+    hi_lbl = fmt(hi)
+
+    css = (
+        "border-radius:10px;"
+        "background:rgba(255,255,255,0.52);"
+        "backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);"
+        "box-shadow:0 2px 12px rgba(0,0,0,0.08);"
+        "padding:10px 13px;"
+        "font-family:system-ui,-apple-system,sans-serif;"
+        "border:1px solid rgba(255,255,255,0.38);"
+        "min-width:160px;"
+    )
+    return (
+        f'<div style="{css}">'
+        f'<div style="font-weight:700;font-size:12px;color:#0f172a;margin-bottom:6px;">{_esc(label)}</div>'
+        f'<div style="height:10px;border-radius:5px;'
+        f'background:linear-gradient(to right,#2ecc71,#f1c40f,#e67e22,#e74c3c);"></div>'
+        f'<div style="display:flex;justify-content:space-between;margin-top:3px;">'
+        f'  <span style="font-size:11px;color:#64748b;">{_esc(lo_lbl)}</span>'
+        f'  <span style="font-size:11px;color:#64748b;">{_esc(hi_lbl)}</span>'
+        f'</div>'
+        f'</div>'
     )
 
 
-def run():
-    st.set_page_config(page_title="NYC Urban Risk — Early Warning System", layout="wide")
-    _inject_dashboard_css()
+# ---------------------------------------------------------------------------
+# App CSS
+# ---------------------------------------------------------------------------
 
-    if "boundaries" not in st.session_state:
-        st.session_state.boundaries = load_boundaries()
-    if "selected_cd" not in st.session_state:
-        st.session_state.selected_cd = None
-    # Allow selecting a district via URL query params (e.g. from map click in iframe)
-    qp = st.query_params
-    if qp.get("cd_id"):
-        st.session_state.selected_cd = {
-            "cd_id": qp.get("cd_id", ""),
-            "borough": qp.get("borough", ""),
-            "neighborhood": qp.get("neighborhood", ""),
-        }
-        # Clear query params so URL is clean (triggers rerun)
-        st.query_params.clear()
-    if "chat_history" not in st.session_state:
-        st.session_state.chat_history = None
+APP_CSS = """
+html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 0; overflow: hidden; }
 
-    date_range = get_date_range()
-    date_min = pd.to_datetime(date_range["min"]).date()
-    date_max = pd.to_datetime(date_range["max"]).date()
-    date_seq = pd.date_range(date_min, date_max, freq="D")
-    months = sorted(date_seq.month.unique())
-    month_names = ["January", "February", "March", "April", "May", "June",
-                   "July", "August", "September", "October", "November", "December"]
-    months_ord = [month_names[m - 1] for m in months]
-    years_ord = sorted(date_seq.year.unique().tolist())
+/* Remove all bslib padding so map can be truly full-bleed */
+.bslib-page-fill {
+    background: linear-gradient(160deg, #f0f4f8 0%, #e2e8f0 100%) !important;
+    padding: 0 !important;
+    height: 100vh !important;
+    overflow: hidden !important;
+}
+.bslib-sidebar-layout {
+    height: 100vh !important;
+}
+.bslib-sidebar-layout > .bslib-main {
+    padding: 0 !important;
+    overflow: hidden !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+}
+/* Kill scrollability on every wrapper Shiny/bslib might inject */
+.bslib-sidebar-layout > .bslib-main > *,
+.bslib-sidebar-layout > .bslib-main > * > * {
+    overflow: hidden !important;
+    max-height: 100vh !important;
+}
 
-    # Sidebar
-    with st.sidebar:
-        st.header("NYC Urban Risk — Early Warning System")
-        (chat_tab,) = st.tabs(["Chatbot"])
-        with chat_tab:
-            st.caption("Suggested prompts")
-            if st.button("Which CDs show rising heat and hospital strain?", use_container_width=True):
-                st.session_state.suggested_prompt = "Which neighborhoods show rising heat and hospital strain?"
-            if st.button("Where is risk accelerating the fastest?", use_container_width=True):
-                st.session_state.suggested_prompt = "Where is risk accelerating the fastest?"
-            if st.button("How does today compare to similar historical patterns?", use_container_width=True):
-                st.session_state.suggested_prompt = "How does today compare to similar historical patterns?"
-            if st.button("Which agencies need to coordinate?", use_container_width=True):
-                st.session_state.suggested_prompt = "Which agencies need to coordinate?"
-            st.divider()
-            chat_input = st.chat_input("Type your question here...")
+/* Sidebar */
+.bslib-sidebar-layout > .bslib-sidebar-panel {
+    background: rgba(255, 255, 255, 0.92) !important;
+    border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
 
-    # Build CD lookup once from cached boundaries (fast)
-    cd_lookup_list = []
-    for f in st.session_state.boundaries.get("features", []):
-        p = f["properties"]
-        cd_id = p.get("cd_id")
-        if cd_id:
-            cd_lookup_list.append({"cd_id": cd_id, "borough": p.get("borough", ""), "neighborhood": p.get("neighborhood", cd_id)})
-    cd_lookup_df = pd.DataFrame(cd_lookup_list)
+/* Map container: fills viewport, slight inset so bottom edge is never clipped */
+.map-container {
+    position: relative;
+    width: 100%;
+    height: calc(100vh - 8px);
+    overflow: hidden;
+    border-radius: 8px;
+}
+/* Iframe absolutely fills the container — bypasses all Shiny output wrapper divs */
+.map-container iframe {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100% !important;
+    height: 100% !important;
+    border: none !important;
+    z-index: 1;
+}
 
-    def _search_matches(query, df, max_results=12):
-        if not query or df.empty:
-            return df.head(0)
-        q = query.strip().lower()
-        mask = (
-            df["cd_id"].str.lower().str.contains(q, na=False) |
-            df["neighborhood"].str.lower().str.contains(q, na=False) |
-            df["borough"].str.lower().str.contains(q, na=False)
-        )
-        return df.loc[mask].head(max_results)
+/* Floating control bar — transparent, overlaid on top of the map */
+.overlay-controls {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    right: 12px;
+    z-index: 20;
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    background: transparent;
+    padding: 0;
+}
+/* Each input container grows/shrinks to fill the bar */
+.overlay-controls .shiny-input-container,
+.overlay-controls .form-group {
+    flex: 1;
+    min-width: 70px;
+    margin-bottom: 0 !important;
+    min-height: unset !important;
+}
+/* Search bar gets more space */
+.overlay-controls .shiny-input-container:first-child { flex: 2.5; min-width: 160px; }
+/* Hide all labels */
+.overlay-controls label { display: none !important; }
+/* White pill inputs */
+.overlay-controls input,
+.overlay-controls select {
+    background: #ffffff !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
+    height: 38px !important;
+    min-height: 38px !important;
+    padding: 4px 12px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+    width: 100% !important;
+}
+/* Search button */
+.overlay-controls .action-button {
+    flex-shrink: 0;
+    height: 38px;
+    min-height: 38px;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 10px;
+    background-color: #2563eb !important;
+    color: white !important;
+    border: none !important;
+    padding: 0 20px;
+    box-shadow: 0 1px 6px rgba(37,99,235,0.3) !important;
+    white-space: nowrap;
+}
+.overlay-controls .action-button:hover { background-color: #1d4ed8 !important; }
 
-    # Top bar: search with type-ahead list directly underneath, then risk layer, date, Search.
-    col1, col2, col3, col4, col5, col6 = st.columns([2, 1, 1, 1, 1, 1])
-    with col1:
-        search_cd = st.text_input("Search community district", placeholder="Search your community district...", label_visibility="collapsed", key="search_cd_input")
-        # Type-ahead: list of matching districts directly under the search bar (only when there's input and matches)
-        if search_cd:
-            search_matches = _search_matches(search_cd, cd_lookup_df)
-            if not search_matches.empty:
-                option_labels = [f"{row['neighborhood']} ({row['borough']} | {row['cd_id']})" for _, row in search_matches.iterrows()]
-                choice = st.radio(
-                    "Matching districts",
-                    options=option_labels,
-                    key="cd_typeahead",
-                    label_visibility="collapsed",
-                    index=None,
-                )
-                if choice is not None:
-                    idx = option_labels.index(choice)
-                    row = search_matches.iloc[idx]
-                    st.session_state.selected_cd = {"cd_id": row["cd_id"], "borough": row["borough"], "neighborhood": row["neighborhood"]}
-    with col2:
-        risk_layer = st.selectbox("Risk Layer", list(RISK_LAYERS.keys()), format_func=lambda k: RISK_LAYERS[k]["label"], label_visibility="collapsed")
-    with col3:
-        sel_month = st.selectbox("Month", months_ord, index=len(months_ord) - 1 if months_ord else 0, label_visibility="collapsed")
-    with col4:
-        sel_day = st.number_input("Day", min_value=1, max_value=31, value=min(15, date_max.day), step=1, label_visibility="collapsed")
-    with col5:
-        sel_year = st.selectbox("Year", years_ord, index=len(years_ord) - 1 if years_ord else 0, label_visibility="collapsed")
-    with col6:
-        btn_search = st.button("Search")
+/* Overlay cards */
+.overlay-stats { position: absolute; top: 68px; right: 12px; z-index: 10; }
 
-    # Resolve selected date
-    month_num = month_names.index(sel_month) + 1
-    try:
-        selected_date = pd.Timestamp(year=sel_year, month=month_num, day=min(sel_day, pd.Timestamp(year=sel_year, month=month_num, day=1).days_in_month)).date()
-    except Exception:
-        selected_date = date_max
-    selected_date = max(date_min, min(date_max, selected_date))
-    date_str = str(selected_date)
+/* Legend: bottom right, above leaflet attribution */
+.overlay-legend { position: absolute; bottom: 28px; right: 12px; z-index: 10; }
 
-    # Search: resolve to CD only when user clicks Search or a suggestion (map does not update while typing)
-    if btn_search and search_cd and not cd_lookup_df.empty:
-        q = search_cd.strip().lower()
-        # Match: exact cd_id, or neighborhood/borough contains query, or query contains borough/neighborhood (e.g. "the bronx" matches borough "Bronx")
-        def field_matches(series, query):
-            s = series.astype(str).str.lower().fillna("")
-            return s.str.contains(query, na=False) | s.apply(lambda v: query.find(v) >= 0 if v else False)
-        match = cd_lookup_df[
-            cd_lookup_df["cd_id"].str.lower().eq(q) |
-            cd_lookup_df["neighborhood"].str.lower().str.contains(q, na=False) |
-            cd_lookup_df["borough"].str.lower().str.contains(q, na=False) |
-            field_matches(cd_lookup_df["borough"], q) |
-            field_matches(cd_lookup_df["neighborhood"], q)
-        ]
-        if not match.empty:
-            row = match.iloc[0]
-            st.session_state.selected_cd = {"cd_id": row["cd_id"], "borough": row["borough"], "neighborhood": row["neighborhood"]}
+/* Bottom row: Top Communities + Trend side by side, floating inside map */
+.overlay-bottom-row {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    z-index: 10;
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    max-width: 780px;
+    pointer-events: none;
+}
+.overlay-bottom-row > div {
+    pointer-events: all;
+    flex: 1;
+    min-width: 280px;
+    max-width: 380px;
+}
 
-    # Suggested prompt from chatbot tab
-    if "suggested_prompt" in st.session_state and st.session_state.get("suggested_prompt"):
-        prompt = st.session_state.suggested_prompt
-        del st.session_state.suggested_prompt
-        chat_input = prompt  # will be processed below after we have selected_date
+/* Chat bubbles */
+.chat-bubble-user {
+    background: #2563eb; color: white;
+    border-radius: 12px 12px 2px 12px;
+    padding: 8px 12px; font-size: 13px;
+    margin-left: 20%; margin-bottom: 6px;
+}
+.chat-bubble-bot {
+    background: rgba(0, 0, 0, 0.05); color: #0f172a;
+    border-radius: 12px 12px 12px 2px;
+    padding: 8px 12px; font-size: 13px;
+    margin-right: 20%; margin-bottom: 6px;
+}
+.chat-area { max-height: 360px; overflow-y: auto; padding: 4px; margin-bottom: 8px; }
+"""
 
-    # Risk data
-    try:
-        rows = get_risk_data(date_str)
-        risk_df = pd.DataFrame(rows)
-    except Exception as e:
-        st.warning(f"Risk data unavailable: {e}. Showing map without data.")
-        risk_df = pd.DataFrame()
+# ---------------------------------------------------------------------------
+# UI definition
+# ---------------------------------------------------------------------------
 
-    # Merge risk into GeoJSON for coloring
-    layer_info = RISK_LAYERS[risk_layer]
-    if not risk_df.empty and layer_info["col"] in risk_df.columns:
-        if risk_layer == "composite":
-            for m in METRICS:
-                risk_df[m + "_norm"] = normalize_metric(risk_df[METRICS[m]["col"]].tolist(), METRICS[m]["domain"])
-            risk_df["display_val"] = risk_df[[m + "_norm" for m in METRICS]].mean(axis=1)
+app_ui = ui.page_fillable(
+    ui.tags.head(ui.tags.style(APP_CSS)),
+    ui.layout_sidebar(
+        ui.sidebar(
+            ui.h5("NYC Urban Risk", style="font-weight:700;color:#0f172a;margin-bottom:2px;"),
+            ui.p("Early Warning System", style="font-size:12px;color:#64748b;margin-top:0;"),
+            ui.navset_tab(
+                ui.nav_panel(
+                    "Chatbot",
+                    ui.p("Suggested prompts",
+                         style="font-size:12px;color:#64748b;margin:8px 0 4px;"),
+                    ui.input_action_button(
+                        "prompt1", "Which CDs show rising heat and hospital strain?",
+                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
+                        style="text-align:left;white-space:normal;"),
+                    ui.input_action_button(
+                        "prompt2", "Where is risk accelerating the fastest?",
+                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
+                        style="text-align:left;white-space:normal;"),
+                    ui.input_action_button(
+                        "prompt3", "How does today compare to similar patterns?",
+                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
+                        style="text-align:left;white-space:normal;"),
+                    ui.input_action_button(
+                        "prompt4", "Which agencies need to coordinate?",
+                        class_="btn btn-outline-primary btn-sm w-100 mb-1",
+                        style="text-align:left;white-space:normal;"),
+                    ui.hr(),
+                    ui.output_ui("chat_messages_ui"),
+                    ui.input_text(
+                        "chat_input", None,
+                        placeholder="Type your question here...", width="100%"),
+                    ui.input_action_button(
+                        "chat_send", "Send",
+                        class_="btn btn-primary btn-sm w-100 mt-1"),
+                ),
+            ),
+            width=320,
+        ),
+        # ---------- Main area: full-bleed map with all overlays ----------
+        ui.div(
+            # Full-bleed map iframe
+            ui.div(ui.output_ui("map_html"), class_="map-iframe-wrap"),
+            # Floating control bar overlaid on map
+            ui.div(
+                ui.input_text(
+                    "search_cd", None,
+                    placeholder="Search your community district...", width="100%"),
+                ui.input_select(
+                    "risk_layer", None,
+                    choices={k: v["label"] for k, v in RISK_LAYERS.items()},
+                    width="100%"),
+                ui.input_select(
+                    "sel_month", None,
+                    choices=MONTHS_ORD,
+                    selected=MONTHS_ORD[-1] if MONTHS_ORD else None,
+                    width="100%"),
+                ui.input_numeric(
+                    "sel_day", None,
+                    value=DATE_MAX.day, min=1, max=31, width="100%"),
+                ui.input_select(
+                    "sel_year", None,
+                    choices=YEARS_ORD,
+                    selected=YEARS_ORD[-1] if YEARS_ORD else None,
+                    width="100%"),
+                ui.input_action_button(
+                    "btn_search", "Search",
+                    class_="btn btn-primary btn-sm action-button"),
+                class_="overlay-controls",
+            ),
+            # Stats card (top right)
+            ui.div(ui.output_ui("cd_stats"), class_="overlay-stats"),
+            # Legend (bottom right)
+            ui.div(ui.output_ui("legend_ui"), class_="overlay-legend"),
+            # Bottom row: Top Communities At Risk + Trend side by side
+            ui.div(
+                ui.div(ui.output_ui("top_risk_ui")),
+                ui.div(ui.output_ui("trend_ui")),
+                class_="overlay-bottom-row",
+            ),
+            class_="map-container",
+        ),
+    ),
+)
+
+# ---------------------------------------------------------------------------
+# Server
+# ---------------------------------------------------------------------------
+
+def server(input, output, session):
+
+    selected_cd = reactive.Value(None)
+    chat_msgs   = reactive.Value([])
+
+    # ---- Date ----------------------------------------------------------------
+
+    @reactive.calc
+    def selected_date():
+        m_name = input.sel_month()
+        m = _MNAMES.index(m_name) + 1 if m_name in _MNAMES else DATE_MAX.month
+        y = int(input.sel_year()) if input.sel_year() else DATE_MAX.year
+        d = max(1, min(int(input.sel_day() or 1), 31))
+        d = min(d, calendar.monthrange(y, m)[1])
+        dt = pd.Timestamp(year=y, month=m, day=d).date()
+        return max(DATE_MIN, min(DATE_MAX, dt))
+
+    # ---- Risk data -----------------------------------------------------------
+
+    @reactive.calc
+    def risk_data():
+        try:
+            rows = get_risk_data(str(selected_date()))
+            return pd.DataFrame(rows) if rows else pd.DataFrame()
+        except Exception as e:
+            print(f"Risk data error: {e}")
+            return pd.DataFrame()
+
+    @reactive.calc
+    def prev_risk_data():
+        """Risk data 30 days before selected_date — used for trend arrows in stats card."""
+        try:
+            prev_date = selected_date() - pd.Timedelta(days=30)
+            prev_date = max(DATE_MIN, prev_date)
+            rows = get_risk_data(str(prev_date))
+            return pd.DataFrame(rows) if rows else pd.DataFrame()
+        except Exception as e:
+            print(f"Prev risk data error: {e}")
+            return pd.DataFrame()
+
+    @reactive.calc
+    def composite_data():
+        df    = risk_data().copy()
+        layer = input.risk_layer()
+        if df.empty or not layer:
+            return df
+        if layer == "composite":
+            for mk, mv in METRICS.items():
+                df[mk + "_n"] = normalize_metric(df[mv["col"]].tolist(), mv["domain"])
+            df["display_val"] = df[[mk + "_n" for mk in METRICS]].mean(axis=1)
         else:
-            risk_df["display_val"] = risk_df[layer_info["col"]]
-        risk_by_cd = risk_df.set_index("cd_id")["display_val"].to_dict()
-    else:
-        risk_by_cd = {}
+            col = RISK_LAYERS[layer]["col"]
+            df["display_val"] = pd.to_numeric(df[col], errors="coerce")
+        return df
 
-    for feat in st.session_state.boundaries.get("features", []):
-        feat["properties"]["_display_val"] = risk_by_cd.get(feat["properties"].get("cd_id"), None)
+    # ---- Map click -----------------------------------------------------------
+    # JS in the folium iframe calls window.parent.Shiny.setInputValue("map_click", ...)
+    # Since the Shiny page is the direct parent of the srcdoc iframe, this works correctly.
 
-    # Map: pydeck (deck.gl) for reliable render in iframe, same approach as energy-burden app
-    map_html = _build_deck_risk_map(st.session_state.boundaries, layer_info["label"], height_px=650)
+    @reactive.effect
+    def _on_map_click():
+        try:
+            click = input.map_click()
+        except Exception:
+            return
+        if click and isinstance(click, dict) and click.get("cd_id"):
+            selected_cd.set(dict(click))
 
-    # Map dashboard: single HTML block with map + overlays (selection via search only)
-    sc = st.session_state.selected_cd
-    stats_card_html = _build_stats_card_html(sc, risk_df)
-    top_risk_html = _build_top_risk_html(risk_df, layer_info)
-    trend_days = 7
-    trend_html = _build_trend_html(sc, risk_layer, layer_info, date_str, trend_days)
-    dashboard_html = _build_map_dashboard_html(map_html, stats_card_html, top_risk_html, trend_html)
-    components.html(dashboard_html, height=650)
+    # ---- Search --------------------------------------------------------------
 
-    if sc:
-        st.sidebar.caption(f"**{sc['neighborhood']}** — {sc['borough']} / {sc['cd_id']}")
+    @reactive.effect
+    @reactive.event(input.btn_search)
+    def _on_search():
+        q = (input.search_cd() or "").strip().lower()
+        if not q or CD_LOOKUP.empty:
+            return
+        mask = (
+            CD_LOOKUP["cd_id"].str.lower().eq(q) |
+            CD_LOOKUP["neighborhood"].str.lower().str.contains(q, na=False) |
+            CD_LOOKUP["borough"].str.lower().str.contains(q, na=False)
+        )
+        match = CD_LOOKUP[mask]
+        if not match.empty:
+            r = match.iloc[0]
+            selected_cd.set({
+                "cd_id":        r["cd_id"],
+                "borough":      r["borough"],
+                "neighborhood": r["neighborhood"],
+            })
 
-    # Chat
-    if chat_input:
-        with st.spinner("Thinking..."):
-            try:
-                result = run_chat(
-                    chat_input,
-                    current_date=date_str,
-                    message_history=st.session_state.chat_history,
-                )
-                st.session_state.chat_history = result["history"]
-                st.sidebar.chat_message("assistant").write(result["response"])
-            except Exception as e:
-                st.sidebar.error(f"Chatbot error: {e}")
+    # ---- Map render ----------------------------------------------------------
 
-    # Legend
-    st.caption(f"Risk layer: {layer_info['label']} (domain {layer_info['domain']} {layer_info['unit']})")
+    @render.ui
+    def map_html():
+        cd    = composite_data()
+        layer = input.risk_layer()
+        li    = RISK_LAYERS[layer]
+        risk_by_cd = (
+            cd.set_index("cd_id")["display_val"].to_dict()
+            if not cd.empty and "display_val" in cd.columns
+            else {}
+        )
+        m = _build_folium_map(BOUNDARIES, risk_by_cd, li["label"])
+        # Save to static file — avoids srcdoc size limits and JS escaping issues
+        map_path = WWW_DIR / "map.html"
+        m.save(str(map_path))
+        # Cache-bust so browser reloads on every risk layer / date change
+        cache_bust = int(pd.Timestamp.now().timestamp() * 1000)
+        # No inline height — CSS absolutely positions the iframe to fill .map-container
+        return ui.HTML(
+            f'<iframe src="map.html?v={cache_bust}" '
+            f'style="width:100%;border:none;" '
+            f'title="NYC Risk Map"></iframe>'
+        )
+
+    # ---- Stats card ----------------------------------------------------------
+
+    @render.ui
+    def cd_stats():
+        return ui.HTML(_stats_card_html(selected_cd(), risk_data(), prev_risk_data()))
+
+    # ---- Top risk ------------------------------------------------------------
+
+    @render.ui
+    def top_risk_ui():
+        li = RISK_LAYERS[input.risk_layer()]
+        return ui.HTML(_top_risk_html(composite_data(), li))
+
+    # ---- Trend ---------------------------------------------------------------
+
+    @render.ui
+    def trend_ui():
+        layer = input.risk_layer()
+        return ui.HTML(_trend_html(
+            selected_cd(), layer, RISK_LAYERS[layer], str(selected_date()), trend_days=30,
+        ))
+
+    # ---- Legend --------------------------------------------------------------
+
+    @render.ui
+    def legend_ui():
+        return ui.HTML(_legend_html(RISK_LAYERS[input.risk_layer()]))
+
+    # ---- Chat ----------------------------------------------------------------
+
+    def _send_chat(msg):
+        if not msg or not msg.strip():
+            return
+        chat_msgs.set(chat_msgs() + [{"role": "user", "content": msg}])
+        try:
+            result   = run_chat(msg, current_date=str(selected_date()), message_history=None)
+            response = result["response"]
+        except Exception as e:
+            response = f"Error: {e}"
+        chat_msgs.set(chat_msgs() + [{"role": "assistant", "content": response}])
+
+    @reactive.effect
+    @reactive.event(input.chat_send)
+    def _on_chat_send():
+        _send_chat(input.chat_input())
+        ui.update_text("chat_input", value="")
+
+    @reactive.effect
+    @reactive.event(input.prompt1)
+    def _p1():
+        _send_chat("Which neighborhoods show rising heat and hospital strain?")
+
+    @reactive.effect
+    @reactive.event(input.prompt2)
+    def _p2():
+        _send_chat("Where is risk accelerating the fastest?")
+
+    @reactive.effect
+    @reactive.event(input.prompt3)
+    def _p3():
+        _send_chat("How does today compare to similar historical patterns?")
+
+    @reactive.effect
+    @reactive.event(input.prompt4)
+    def _p4():
+        _send_chat("Which agencies need to coordinate?")
+
+    @render.ui
+    def chat_messages_ui():
+        msgs = chat_msgs()
+        if not msgs:
+            return ui.div(
+                ui.p(
+                    "I can help you analyze current risk across NYC Community Districts. "
+                    "What do you want to learn about?",
+                    style=(
+                        "font-size:13px;color:#334155;"
+                        "background:rgba(0,0,0,0.04);"
+                        "border-radius:8px;padding:10px;margin:0;"
+                    ),
+                ),
+                class_="chat-area",
+            )
+        items = [
+            ui.div(m["content"],
+                   class_="chat-bubble-user" if m["role"] == "user" else "chat-bubble-bot")
+            for m in msgs
+        ]
+        return ui.div(*items, class_="chat-area")
 
 
-if __name__ == "__main__":
-    run()
+# ---------------------------------------------------------------------------
+# App entry point
+# ---------------------------------------------------------------------------
+
+app = App(app_ui, server, static_assets=str(WWW_DIR))
