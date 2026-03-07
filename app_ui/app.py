@@ -1305,6 +1305,16 @@ app_ui = ui.page_fillable(
                 ui.div(ui.output_ui("trend_ui")),
                 class_="overlay-bottom-row",
             ),
+            # Attribution line pinned to the very bottom-right of the map
+            ui.div(
+                "Created by Louise Smith & Allyanna Panganiban",
+                style=(
+                    "position:absolute;bottom:4%;right:11px;z-index:10;"
+                    "font-size:8px;line-height:1;margin:0;padding:0;"
+                    "font-weight:bold;"
+                    "color:#000000;font-family:system-ui,-apple-system,sans-serif;"
+                ),
+            ),
             class_="map-container",
         ),
     ),
