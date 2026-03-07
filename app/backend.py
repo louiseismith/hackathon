@@ -5,6 +5,7 @@ Called via reticulate::source_python("backend.py") from app.R.
 
 import os
 import psycopg2
+import psycopg2.pool
 from dotenv import load_dotenv
 
 # Look for .env in app dir then parent
@@ -32,16 +33,29 @@ def borocd_to_cd_id(borocd: int) -> str | None:
     return cd_id if cd_id in _VALID_CDS else None
 
 
+# Singleton connection pool — 2 connections max so backend.py and
+# data_loader.py together stay well under Supabase's session-mode limit.
+_POOL: psycopg2.pool.ThreadedConnectionPool | None = None
+
+def _get_pool() -> psycopg2.pool.ThreadedConnectionPool:
+    global _POOL
+    if _POOL is None:
+        _POOL = psycopg2.pool.ThreadedConnectionPool(
+            minconn=1,
+            maxconn=2,
+            host=os.getenv("SUPABASE_HOST"),
+            port=int(os.getenv("SUPABASE_PORT", "5432")),
+            dbname=os.getenv("SUPABASE_DB", "postgres"),
+            user=os.getenv("SUPABASE_USER", "postgres"),
+            password=os.getenv("SUPABASE_PASSWORD", ""),
+            connect_timeout=10,
+            sslmode="require",
+        )
+    return _POOL
+
+
 def _get_conn():
-    return psycopg2.connect(
-        host=os.getenv("SUPABASE_HOST"),
-        port=int(os.getenv("SUPABASE_PORT", "5432")),
-        dbname=os.getenv("SUPABASE_DB", "postgres"),
-        user=os.getenv("SUPABASE_USER", "postgres"),
-        password=os.getenv("SUPABASE_PASSWORD", ""),
-        connect_timeout=10,
-        sslmode="require",
-    )
+    return _get_pool().getconn()
 
 
 def get_risk_data(date_str: str) -> list[dict]:
@@ -86,7 +100,7 @@ def get_risk_data(date_str: str) -> list[dict]:
             for row in rows
         ]
     finally:
-        conn.close()
+        _get_pool().putconn(conn)
 
 
 def get_date_range() -> dict:
@@ -98,7 +112,7 @@ def get_date_range() -> dict:
             min_date, max_date = cur.fetchone()
         return {"min": str(min_date), "max": str(max_date)}
     finally:
-        conn.close()
+        _get_pool().putconn(conn)
 
 
 def get_risk_series(cd_id: str, start_date: str, end_date: str) -> list[dict]:
@@ -142,4 +156,4 @@ def get_risk_series(cd_id: str, start_date: str, end_date: str) -> list[dict]:
             for row in rows
         ]
     finally:
-        conn.close()
+        _get_pool().putconn(conn)

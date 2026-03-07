@@ -209,6 +209,7 @@ def _build_folium_map(boundaries, risk_by_cd, layer_label):
         zoom_start=11,
         tiles="CartoDB positron",
         prefer_canvas=True,
+        zoom_control=False,
     )
     gj = copy.deepcopy(boundaries)
     for feat in gj["features"]:
@@ -626,6 +627,7 @@ html, body {
     border-right: 1px solid rgba(0, 0, 0, 0.06) !important;
     max-width: 50vw !important;
     min-width: 420px !important;
+    height: 100vh !important;
     overflow: hidden !important;
 }
 .bslib-sidebar-panel .sidebar-content {
@@ -654,19 +656,15 @@ html, body {
     overflow: hidden !important;
 }
 
-/* Chat panel: container scrolls; prompts STICKY top, input STICKY bottom */
-.chat-panel-container {
+/* Chat panel: outer is a bounded flex column; only the messages area scrolls */
+.chat-panel-outer {
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
 .chat-panel-prompts {
-    position: sticky;
-    top: 0;
-    z-index: 10;
     flex-shrink: 0;
     background: transparent !important;
     padding-bottom: 4px;
@@ -683,15 +681,16 @@ html, body {
     border-color: rgba(100,116,139,0.5) !important;
 }
 .chat-panel-prompts .btn-sm { font-size: 10px !important; }
-.chat-panel-messages {
+.chat-panel-messages-scroll {
     flex: 1;
-    min-height: min-content;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+.chat-panel-messages {
     padding: 4px 0;
 }
 .chat-panel-input {
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
     flex-shrink: 0;
     padding: 8px 0 0 0;
     margin-top: 6px;
@@ -765,7 +764,10 @@ html, body {
     flex: 1;
     min-width: 70px;
     margin-bottom: 0 !important;
-    min-height: unset !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    max-height: 30px !important;
+    overflow: visible !important;
 }
 /* Search bar gets more space */
 .overlay-controls .shiny-input-container:first-child { flex: 2.5; min-width: 120px; }
@@ -778,14 +780,28 @@ html, body {
     min-height: 30px !important;
 }
 /* White pill inputs — smaller, full width */
-.overlay-controls input,
-.overlay-controls select {
-    background: #ffffff !important;
+.overlay-controls input {
+    background-color: #ffffff !important;
     border-radius: 6px !important;
     font-size: 11px !important;
     height: 30px !important;
     min-height: 30px !important;
     padding: 2px 8px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
+    width: 100% !important;
+}
+/* Native selects: background-color only (preserves Bootstrap's chevron background-image);
+   no padding-right override so the arrow stays readable */
+.overlay-controls select {
+    background-color: #ffffff !important;
+    border-radius: 6px !important;
+    font-size: 11px !important;
+    height: 30px !important;
+    min-height: 30px !important;
+    padding-top: 2px !important;
+    padding-bottom: 2px !important;
+    padding-left: 8px !important;
     border: 1px solid rgba(0,0,0,0.08) !important;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
     width: 100% !important;
@@ -797,13 +813,25 @@ html, body {
     font-size: 11px !important;
     min-height: 30px !important;
     height: 30px !important;
-    line-height: 22px !important;
+    line-height: 24px !important;
     padding: 2px 8px !important;
     border: 1px solid rgba(0,0,0,0.08) !important;
     box-shadow: 0 1px 4px rgba(0,0,0,0.08) !important;
     cursor: text !important;
-    display: flex !important;
-    align-items: center !important;
+}
+
+/* Selectize injects a real <input> inside .selectize-input; our generic
+   "input { height: 30px }" rule expands it, blowing out the outer container.
+   Reset it so the outer container stays 30px. */
+.overlay-controls .selectize-input input {
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+    width: auto !important;
 }
 
 .overlay-controls .selectize-input.focus {
@@ -1045,7 +1073,8 @@ app_ui = ui.page_fillable(
                 "Community Risk Insight &\n Action Platform",
                 style="font-size:14px;color:#64748b;margin:0;",
             ),
-            ui.navset_underline(
+            ui.div(
+              ui.navset_underline(
                 ui.nav_panel(
                     "AI Summary",
                     ui.div(ui.output_ui("ai_summary_tab"), id="ai_summary_tab"),
@@ -1085,7 +1114,10 @@ app_ui = ui.page_fillable(
                                 style="text-align:right;margin-bottom:4px;"),
                             class_="chat-panel-prompts",
                         ),
-                        ui.div(ui.output_ui("chat_messages_ui"), class_="chat-panel-messages"),
+                        ui.div(
+                            ui.div(ui.output_ui("chat_messages_ui"), class_="chat-panel-messages"),
+                            class_="chat-panel-messages-scroll",
+                        ),
                         ui.div(
                             ui.input_text(
                                 "chat_input", None,
@@ -1095,10 +1127,12 @@ app_ui = ui.page_fillable(
                                 class_="btn btn-primary btn-sm w-100 mt-1"),
                             class_="chat-panel-input",
                         ),
-                        class_="chat-panel-container",
+                        class_="chat-panel-outer",
                     ),
                 ),
                 selected="AI Summary",
+              ),
+              style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;",
             ),
             width=390,
         ),
@@ -1245,6 +1279,12 @@ def server(input, output, session):
             return
         if click and isinstance(click, dict) and click.get("cd_id"):
             selected_cd.set(dict(click))
+
+    # ---- Layer change (immediate — no Search required) -----------------------
+
+    @reactive.effect
+    def _on_layer_change():
+        applied_layer.set(input.risk_layer())
 
     # ---- Search (type-ahead selectize — auto-selects on pick) ----------------
 
