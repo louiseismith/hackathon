@@ -8,6 +8,9 @@ scripts/upload_to_supabase.py
 .env
 .venv/
 
+# Generated map (rebuilt on each render)
+app_ui/www/map.html
+
 # Python
 __pycache__/
 *.pyc
