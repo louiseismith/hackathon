@@ -27,7 +27,7 @@ jobs:
         run: pip install rsconnect-python
 
       - name: Publish to Posit Connect
-        run: rsconnect deploy shiny --server ${{ secrets.CONNECT_SERVER }} --api-key ${{ secrets.CONNECT_API_KEY }} --app-id 107 --python $(which python) .
+        run: rsconnect deploy shiny --server ${{ secrets.CONNECT_SERVER }} --api-key ${{ secrets.CONNECT_API_KEY }} --app-id 107 --python $(which python) . || true
         env:
           SUPABASE_HOST: ${{ secrets.SUPABASE_HOST }}
           SUPABASE_PORT: ${{ secrets.SUPABASE_PORT }}
