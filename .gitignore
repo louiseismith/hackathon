@@ -1,7 +1,11 @@
-# Data generation scripts and schema (internal use only)
-scripts/
-schema.sql
+# Data generation outputs (large CSVs) and environment data
 data/
+
+# Data generation and upload scripts (internal use only)
+scripts/generate_heat_index.py
+scripts/generate_hospital_capacity.py
+scripts/generate_transit_delays.py
+scripts/upload_to_supabase.py
 
 # Environment
 .env
