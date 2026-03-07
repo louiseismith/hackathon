@@ -3,6 +3,8 @@
 # 0. SETUP ----
 
 library(shiny)
+library(bslib)
+library(shinychat)
 library(leaflet)
 library(sf)
 library(dplyr)
@@ -21,6 +23,12 @@ for (p in c(".", "..")) {
 
 # Load Python backend
 reticulate::source_python(file.path(getwd(), "backend.py"))
+
+# Add app/ dir to Python path so chatbot package (app/chatbot/) is importable
+py_run_string(paste0('import sys; sys.path.insert(0, r"', normalizePath(getwd()), '")'))
+
+# Import chatbot agent
+chatbot_agent <- import("chatbot.agent")
 
 # Load + prep GeoJSON boundaries
 geojson_path <- file.path(getwd(), "nyc_cd_boundaries.geojson")
@@ -45,43 +53,69 @@ METRICS <- list(
 
 # 1. UI ----
 
-ui <- fluidPage(
+ui <- navbarPage(
+  title = "NYC Urban Risk — Early Warning System",
+  id    = "nav",
+
   tags$head(tags$style(HTML("
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f5f5f5; }
     .sidebar { background: #fff; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
     .risk-table { font-size: 13px; }
     h4 { font-weight: 600; margin-bottom: 4px; }
     .metric-label { font-size: 11px; color: #888; margin-bottom: 12px; }
+    /* Make chat tab fill the viewport */
+    #chat-tab-content { height: calc(100vh - 60px); display: flex; flex-direction: column; }
   "))),
 
-  titlePanel("NYC Urban Risk — Early Warning System"),
-
-  sidebarLayout(
-    sidebarPanel(
-      width = 3,
-      div(class = "sidebar",
-        h4("Controls"),
-        dateInput(
-          "selected_date", "Date",
-          value = date_range$max,
-          min   = date_range$min,
-          max   = date_range$max
-        ),
-        selectInput(
-          "selected_metric", "Risk Layer",
-          choices = setNames(names(METRICS), sapply(METRICS, `[[`, "label")),
-          selected = "heat_index_risk"
-        ),
-        hr(),
-        h4("Top Risk Neighborhoods"),
-        p(class = "metric-label", "Ranked by selected metric"),
-        tableOutput("risk_table")
+  # --- Tab 1: Map ---
+  tabPanel(
+    "Map",
+    sidebarLayout(
+      sidebarPanel(
+        width = 3,
+        div(class = "sidebar",
+          h4("Controls"),
+          dateInput(
+            "selected_date", "Week ending",
+            value = date_range$max,
+            min   = date_range$min,
+            max   = date_range$max
+          ),
+          selectInput(
+            "selected_metric", "Risk Layer",
+            choices = setNames(names(METRICS), sapply(METRICS, `[[`, "label")),
+            selected = "heat_index_risk"
+          ),
+          hr(),
+          h4("Top Risk Neighborhoods"),
+          p(class = "metric-label", "Ranked by selected metric"),
+          tableOutput("risk_table")
+        )
+      ),
+      mainPanel(
+        width = 9,
+        leafletOutput("risk_map", height = "85vh")
       )
-    ),
+    )
+  ),
 
-    mainPanel(
-      width = 9,
-      leafletOutput("risk_map", height = "85vh")
+  # --- Tab 2: Chatbot ---
+  tabPanel(
+    "Chatbot",
+    div(id = "chat-tab-content",
+      layout_sidebar(
+        sidebar = sidebar(
+          width = 280,
+          h5("Suggested prompts"),
+          actionButton("prompt1", "Which districts are highest risk today?",            class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt2", "Where is risk accelerating the fastest?",            class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt3", "Which districts show rising heat and hospital strain?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt4", "How does today compare to similar historical patterns in BX-03?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt5", "Which agencies need to coordinate for QN-04 today?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          hr()
+        ),
+        chat_ui("chat", fill = TRUE, placeholder = "Ask about NYC Community District risk (e.g. heat, hospital, transit)...")
+      )
     )
   )
 )
@@ -89,6 +123,34 @@ ui <- fluidPage(
 # 2. SERVER ----
 
 server <- function(input, output, session) {
+
+  # --- Chatbot helpers ---
+  call_chat_api <- function(msg) {
+    nid <- showNotification(
+      tagList(tags$strong("Thinking..."), " this may take a few seconds"),
+      duration = NULL, closeButton = FALSE, type = "message"
+    )
+    on.exit(removeNotification(nid))
+    tryCatch(
+      chatbot_agent$run_chat(msg, current_date = as.character(input$selected_date)),
+      error = function(e) paste0("Chatbot error: ", conditionMessage(e))
+    )
+  }
+
+  observeEvent(input$chat_user_input, {
+    msg <- input$chat_user_input
+    if (is.null(msg) || trimws(msg) == "") return()
+    chat_append("chat", call_chat_api(msg))
+  })
+
+  suggest_send <- function(prompt) chat_append("chat", call_chat_api(prompt))
+  observeEvent(input$prompt1, suggest_send("Which districts are highest risk today?"))
+  observeEvent(input$prompt2, suggest_send("Where is risk accelerating the fastest?"))
+  observeEvent(input$prompt3, suggest_send("Which community districts show rising heat and hospital strain?"))
+  observeEvent(input$prompt4, suggest_send("How does today compare to similar historical patterns in BX-03?"))
+  observeEvent(input$prompt5, suggest_send("Which agencies need to coordinate for QN-04 today?"))
+
+  # --- Map ---
 
   # Fetch risk data reactively when date changes
   risk_data <- reactive({

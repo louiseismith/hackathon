@@ -94,7 +94,7 @@ def create_agent() -> Agent:
     agent = Agent(
         "openai:gpt-4o-mini",
         deps_type=None,
-        instructions=SYSTEM_PROMPT,
+        system_prompt=SYSTEM_PROMPT,
         tools=[
             tool_get_cd_snapshot,
             tool_get_top_risk_cds,
@@ -109,8 +109,20 @@ def create_agent() -> Agent:
     return agent
 
 
-def run_chat(user_message: str) -> str:
-    """Run the agent on one user message and return the assistant reply text."""
+def run_chat(user_message: str, current_date: str | None = None) -> str:
+    """Run the agent on one user message and return the assistant reply text.
+
+    current_date: if provided, injected as context so the agent treats it as
+    'today' and restricts queries to data on or before this date.
+    """
     agent = create_agent()
-    result = agent.run_sync(user_message)
+    if current_date:
+        message = (
+            f"[Context: Today's date is {current_date}. "
+            f"Only use data up to and including {current_date} — do not reference or query dates after this.]\n\n"
+            f"{user_message}"
+        )
+    else:
+        message = user_message
+    result = agent.run_sync(message)
     return result.output or "I couldn't generate a response. Please try rephrasing or specifying a date/CD."

@@ -46,7 +46,7 @@ def _get_conn():
 
 def get_risk_data(date_str: str) -> list[dict]:
     """
-    Fetch all risk metrics for every CD on the given date.
+    Fetch 7-day average risk metrics for every CD ending on the given date.
     Returns a list of dicts, one per CD, with all risk columns.
     """
     conn = _get_conn()
@@ -57,20 +57,21 @@ def get_risk_data(date_str: str) -> list[dict]:
                     h.cd_id,
                     cd.borough,
                     cd.neighborhood,
-                    h.heat_index_risk,
-                    h.temperature_f,
-                    h.humidity_pct,
-                    hc.total_capacity_pct,
-                    hc.icu_capacity_pct,
-                    hc.ed_wait_hours,
-                    t.transit_delay_index
+                    AVG(h.heat_index_risk)    AS heat_index_risk,
+                    AVG(h.temperature_f)      AS temperature_f,
+                    AVG(h.humidity_pct)       AS humidity_pct,
+                    AVG(hc.total_capacity_pct) AS total_capacity_pct,
+                    AVG(hc.icu_capacity_pct)  AS icu_capacity_pct,
+                    AVG(hc.ed_wait_hours)     AS ed_wait_hours,
+                    AVG(t.transit_delay_index) AS transit_delay_index
                 FROM heat_index h
-                JOIN community_districts cd  ON cd.cd_id = h.cd_id
-                JOIN hospital_capacity  hc  ON hc.cd_id = h.cd_id  AND hc.date = h.date
-                JOIN transit_delays     t   ON t.cd_id  = h.cd_id  AND t.date  = h.date
-                WHERE h.date = %s
+                JOIN community_districts cd ON cd.cd_id = h.cd_id
+                JOIN hospital_capacity  hc  ON hc.cd_id = h.cd_id AND hc.date = h.date
+                JOIN transit_delays     t   ON t.cd_id  = h.cd_id AND t.date  = h.date
+                WHERE h.date BETWEEN (%s::date - INTERVAL '6 days') AND %s::date
+                GROUP BY h.cd_id, cd.borough, cd.neighborhood
                 ORDER BY h.cd_id
-            """, (date_str,))
+            """, (date_str, date_str))
             cols = [desc[0] for desc in cur.description]
             rows = cur.fetchall()
         def _clean(v):

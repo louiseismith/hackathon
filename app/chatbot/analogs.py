@@ -5,23 +5,15 @@ On-demand computation (per CD only) to avoid huge precompute.
 import pandas as pd
 import numpy as np
 
-from . import data_loader
-from .data_loader import ensure_loaded
+from .data_loader import query_cd_history
 
 # Normalized columns for similarity (0-100 scale or similar)
 FEATURE_COLS = ["heat_index_risk", "total_capacity_pct", "transit_delay_index"]
 
 
 def _get_cd_merged(cd_id: str) -> pd.DataFrame:
-    """Merge heat, hospital, transit for one CD. Requires data loaded."""
-    heat_df = data_loader.heat_df
-    hospital_df = data_loader.hospital_df
-    transit_df = data_loader.transit_df
-    h = heat_df[heat_df["cd_id"] == cd_id][["date", "heat_index_risk", "temperature_f", "humidity_pct"]]
-    hosp = hospital_df[hospital_df["cd_id"] == cd_id][["date", "total_capacity_pct", "icu_capacity_pct", "ed_wait_hours"]]
-    t = transit_df[transit_df["cd_id"] == cd_id][["date", "transit_delay_index"]]
-    m = h.merge(hosp, on="date").merge(t, on="date").sort_values("date").reset_index(drop=True)
-    return m
+    """Fetch full history for one CD from Supabase."""
+    return query_cd_history(cd_id)
 
 
 def _similarity_row(target: pd.Series, candidate: pd.Series) -> float:
@@ -37,7 +29,6 @@ def get_historical_analogs(cd_id: str, date: pd.Timestamp, top_k: int = 5) -> li
     For (cd_id, date), return top-k similar historical dates (excluding same date and future).
     Each result: {date, similarity_score, what_happened_next: str}.
     """
-    ensure_loaded()
     merged = _get_cd_merged(cd_id)
     if merged.empty:
         return []
