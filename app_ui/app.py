@@ -486,8 +486,8 @@ def _trend_html(sc, risk_layer, layer_info, date_str, trend_days=30):
     fig.patch.set_facecolor("none")
     ax.set_facecolor("none")
 
-    line_color = "#2563eb"  # App primary blue
-    fill_color = "#2563eb"
+    line_color = "#0d0887"  # Legend deep purple
+    fill_color = "#7e03a8"  # Legend purple
     dates = sdf["date"]
     vals = sdf["display_val"].astype(float)
 
@@ -771,6 +771,12 @@ html, body {
 }
 /* Search bar gets more space */
 .overlay-controls .shiny-input-container:first-child { flex: 2.5; min-width: 120px; }
+/* Risk layer: shorter so month/year fit (Transit Index, Heat Index fit; longer names may truncate) */
+.overlay-controls .shiny-input-container:nth-child(2) { flex: 0 0 120px; min-width: 120px; max-width: 120px; }
+/* Date inputs: wider so month name and year show fully */
+.overlay-controls .shiny-input-container:nth-child(3) { flex: 0 0 88px; min-width: 88px; max-width: 88px; }
+.overlay-controls .shiny-input-container:nth-child(4) { flex: 0 0 40px; min-width: 40px; max-width: 40px; }
+.overlay-controls .shiny-input-container:nth-child(5) { flex: 0 0 58px; min-width: 58px; max-width: 58px; }
 /* Hide all labels */
 .overlay-controls label { display: none !important; }
 /* Ensure selectize search bar matches dropdown height — compact */
@@ -856,7 +862,7 @@ html, body {
     color: #1d4ed8 !important;
 }
 
-/* Search button — compact */
+/* Search button — compact, legend deep purple */
 .overlay-controls .action-button {
     flex-shrink: 0;
     height: 30px;
@@ -864,14 +870,14 @@ html, body {
     font-size: 11px;
     font-weight: 500;
     border-radius: 6px;
-    background-color: #2563eb !important;
+    background-color: #0d0887 !important;
     color: white !important;
     border: none !important;
     padding: 0 14px;
-    box-shadow: 0 1px 4px rgba(37,99,235,0.3) !important;
+    box-shadow: 0 1px 4px rgba(13,8,135,0.3) !important;
     white-space: nowrap;
 }
-.overlay-controls .action-button:hover { background-color: #1d4ed8 !important; }
+.overlay-controls .action-button:hover { background-color: #7e03a8 !important; }
 
 /* Search error banner under controls */
 .search-error-banner {
@@ -1021,6 +1027,27 @@ html, body {
 .cd-panel-recs    { border-left-color: #2a7ae0; }
 #ai_summary_tab { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
 
+/* Loading affordance for AI report */
+.loading-affordance {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #64748b;
+}
+.loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #e2e8f0;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: loading-spin 0.8s linear infinite;
+}
+@keyframes loading-spin {
+    to { transform: rotate(360deg); }
+}
+
 /* Typing dots indicator */
 .typing-indicator { display: flex; align-items: center; gap: 4px; padding: 10px 14px; }
 .typing-indicator span {
@@ -1071,13 +1098,22 @@ app_ui = ui.page_fillable(
             ui.h5("NYC Risk Horizon", style="font-size:22px;font-weight:700;color:#0f172a;margin:0 0 -1px 0;"),
             ui.p(
                 "Community Risk Insight &\n Action Platform",
-                style="font-size:14px;color:#64748b;margin:0;",
+                style="font-size:14px;color:#64748b;margin:0 0 2px 0;",
+            ),
+            ui.p(
+                "This prototype uses synthetic data. Do not use this information for real-world decisions.",
+                style="font-size:10px;color:#94a3b8;margin:2px 0 4px 0;",
             ),
             ui.div(
               ui.navset_underline(
                 ui.nav_panel(
                     "AI Summary",
-                    ui.div(ui.output_ui("ai_summary_tab"), id="ai_summary_tab"),
+                    ui.div(
+                        ui.output_ui("ai_summary_loading_ui"),
+                        ui.output_ui("ai_summary_tab"),
+                        id="ai_summary_tab",
+                        style="position:relative;",
+                    ),
                 ),
                 ui.nav_panel(
                     "Chatbot",
@@ -1134,7 +1170,7 @@ app_ui = ui.page_fillable(
               ),
               style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;",
             ),
-            width=390,
+            width=450,
         ),
         # ---------- Main area: full-bleed map with all overlays ----------
         ui.div(
@@ -1148,7 +1184,7 @@ app_ui = ui.page_fillable(
                     selected="",
                     width="100%",
                     options={
-                        "placeholder": "Choose your community district",
+                        "placeholder": "Choose your district",
                         "allowEmptyOption": True,
                         "maxOptions": 80,
                     },
@@ -1156,20 +1192,20 @@ app_ui = ui.page_fillable(
                 ui.input_select(
                     "risk_layer", None,
                     choices={k: v["label"] for k, v in RISK_LAYERS.items()},
-                    selected="total_capacity_pct",
+                    selected="transit_delay_index",
                     width="100%"),
                 ui.input_select(
                     "sel_month", None,
                     choices=MONTHS_ORD,
-                    selected="January" if "January" in MONTHS_ORD else (MONTHS_ORD[0] if MONTHS_ORD else None),
+                    selected="March" if "March" in MONTHS_ORD else (MONTHS_ORD[0] if MONTHS_ORD else None),
                     width="100%"),
                 ui.input_numeric(
                     "sel_day", None,
-                    value=31, min=1, max=31, width="100%"),
+                    value=6, min=1, max=31, width="100%"),
                 ui.input_select(
                     "sel_year", None,
                     choices=YEARS_ORD,
-                    selected="2020" if "2020" in YEARS_ORD else (YEARS_ORD[-1] if YEARS_ORD else None),
+                    selected="2026" if "2026" in YEARS_ORD else (YEARS_ORD[-1] if YEARS_ORD else None),
                     width="100%"),
                 ui.input_action_button("search_go", "Search"),
                 class_="overlay-controls",
@@ -1211,11 +1247,12 @@ def server(input, output, session):
     selected_cd   = reactive.Value(None)
     chat_msgs     = reactive.Value([])
     chat_history  = reactive.Value(None)   # PydanticAI ModelMessage history
-    is_typing     = reactive.Value(False)
+    is_typing         = reactive.Value(False)
+    ai_summary_loading = reactive.Value(False)
     search_error  = reactive.Value("")
-    _default_date = max(DATE_MIN, min(DATE_MAX, pd.Timestamp("2020-01-31").date()))
+    _default_date = max(DATE_MIN, min(DATE_MAX, pd.Timestamp("2026-03-06").date()))
     applied_date  = reactive.Value(_default_date)
-    applied_layer = reactive.Value("total_capacity_pct")
+    applied_layer = reactive.Value("transit_delay_index")
 
     # ---- Date ----------------------------------------------------------------
 
@@ -1438,9 +1475,24 @@ def server(input, output, session):
     # ---- AI Summary tab ------------------------------------------------------
 
     @render.ui
+    def ai_summary_loading_ui():
+        if not ai_summary_loading():
+            return ui.HTML("")
+        return ui.div(
+            ui.HTML(
+                '<div class="loading-affordance">'
+                '<div class="loading-spinner"></div>'
+                '<span>Loading AI report...</span>'
+                '</div>'
+            ),
+            style="padding:16px;text-align:center;",
+        )
+
+    @render.ui
     async def ai_summary_tab():
         sc = selected_cd()
         if not sc or not sc.get("cd_id"):
+            ai_summary_loading.set(False)
             return ui.div(
                 ui.p(
                     "Click a district on the map or use search to load its AI summary.",
@@ -1452,41 +1504,44 @@ def server(input, output, session):
         name     = sc.get("neighborhood") or cd_id
         date_str = str(applied_date())
 
-        header = ui.div(
-            ui.tags.strong(name, style="font-size:12px;color:#0f172a;"),
-            ui.p(cd_id, style="font-size:10px;color:#64748b;margin:1px 0 6px;"),
-        )
-
-        loop = asyncio.get_event_loop()
+        ai_summary_loading.set(True)
         try:
-            summary = await loop.run_in_executor(
-                _CHAT_EXECUTOR, lambda: run_cd_summary(cd_id, date_str)
-            )
-        except Exception as e:
-            summary = f"Error generating summary: {e}"
+            loop = asyncio.get_event_loop()
+            try:
+                summary = await loop.run_in_executor(
+                    _CHAT_EXECUTOR, lambda: run_cd_summary(cd_id, date_str)
+                )
+            except Exception as e:
+                summary = f"Error generating summary: {e}"
 
-        try:
-            recs = await loop.run_in_executor(
-                _CHAT_EXECUTOR, lambda: run_cd_recommendations(cd_id, date_str)
-            )
-        except Exception as e:
-            recs = f"Error generating decision signals: {e}"
+            try:
+                recs = await loop.run_in_executor(
+                    _CHAT_EXECUTOR, lambda: run_cd_recommendations(cd_id, date_str)
+                )
+            except Exception as e:
+                recs = f"Error generating decision signals: {e}"
 
-        return ui.div(
-            header,
-            ui.div(
-                ui.tags.h5("Risk Overview"),
-                ui.div(ui.HTML(md_lib.markdown(summary, extensions=["tables", "nl2br"])),
-                       class_="ai-content"),
-                class_="cd-panel cd-panel-summary",
-            ),
-            ui.div(
-                ui.tags.h5("Decision Signals"),
-                ui.div(ui.HTML(md_lib.markdown(recs, extensions=["tables", "nl2br"])),
-                       class_="ai-content"),
-                class_="cd-panel cd-panel-recs",
-            ),
-        )
+            header = ui.div(
+                ui.tags.strong(name, style="font-size:12px;color:#0f172a;"),
+                ui.p(cd_id, style="font-size:10px;color:#64748b;margin:1px 0 6px;"),
+            )
+            return ui.div(
+                header,
+                ui.div(
+                    ui.tags.h5("Risk Overview"),
+                    ui.div(ui.HTML(md_lib.markdown(summary, extensions=["tables", "nl2br"])),
+                           class_="ai-content"),
+                    class_="cd-panel cd-panel-summary",
+                ),
+                ui.div(
+                    ui.tags.h5("Decision Signals"),
+                    ui.div(ui.HTML(md_lib.markdown(recs, extensions=["tables", "nl2br"])),
+                           class_="ai-content"),
+                    class_="cd-panel cd-panel-recs",
+                ),
+            )
+        finally:
+            ai_summary_loading.set(False)
 
     # ---- Chat ----------------------------------------------------------------
 
