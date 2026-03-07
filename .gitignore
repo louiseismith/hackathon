@@ -1,6 +1,3 @@
-# Data generation outputs (large CSVs) and environment data
-data/
-
 # Data generation and upload scripts (internal use only)
 scripts/generate_heat_index.py
 scripts/generate_hospital_capacity.py
