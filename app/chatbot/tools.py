@@ -79,6 +79,21 @@ HOSPITAL_HIGH = 85
 TRANSIT_HIGH = 30
 
 
+def _percentile_label(pct: float | None) -> str:
+    """Translate a percentile rank into a plain-language level label."""
+    if pct is None:
+        return "unknown"
+    if pct < 25:
+        return "well below typical for this time of year"
+    if pct < 75:
+        return "typical for this time of year"
+    if pct < 90:
+        return "above typical for this time of year"
+    if pct < 95:
+        return "among the highest on record for this month"
+    return "one of the highest on record for this month"
+
+
 def _primary_concern(heat: float, hosp: float, transit: float) -> str:
     if heat >= HEAT_HIGH and hosp >= HOSPITAL_HIGH:
         return "multi-factor"
