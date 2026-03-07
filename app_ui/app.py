@@ -786,12 +786,13 @@ html, body {
     z-index: 1;
 }
 
-/* Floating control bar — transparent, overlaid on top of the map */
+/* Floating control bar — spans full map width, overlaid on top */
 .overlay-controls {
     position: absolute;
     top: 12px;
     left: 12px;
     right: 12px;
+    width: calc(100% - 24px);
     z-index: 20;
     display: flex;
     flex-wrap: nowrap;
@@ -799,6 +800,7 @@ html, body {
     gap: 8px;
     background: transparent;
     padding: 0;
+    box-sizing: border-box;
 }
 /* Each input container grows/shrinks to fill the bar */
 .overlay-controls .shiny-input-container,
@@ -811,14 +813,16 @@ html, body {
     max-height: 30px !important;
     overflow: visible !important;
 }
-/* Search bar gets more space */
-.overlay-controls .shiny-input-container:first-child { flex: 2.5; min-width: 120px; }
-/* Risk layer: shorter so month/year fit (Transit Index, Heat Index fit; longer names may truncate) */
-.overlay-controls .shiny-input-container:nth-child(2) { flex: 0 0 120px; min-width: 120px; max-width: 120px; }
-/* Date inputs: wider so month name and year show fully */
-.overlay-controls .shiny-input-container:nth-child(3) { flex: 0 0 88px; min-width: 88px; max-width: 88px; }
-.overlay-controls .shiny-input-container:nth-child(4) { flex: 0 0 40px; min-width: 40px; max-width: 40px; }
-.overlay-controls .shiny-input-container:nth-child(5) { flex: 0 0 58px; min-width: 58px; max-width: 58px; }
+/* District search bar — grows to fill remaining space so row spans full map width */
+.overlay-controls .shiny-input-container:first-child { flex: 1 1 0; min-width: 140px; }
+/* Risk layer — wide enough for "Composite Score", "Hospital Capacity" */
+.overlay-controls .shiny-input-container:nth-child(2) { flex: 0 0 140px; min-width: 140px; max-width: 140px; }
+/* Month — fit "September" */
+.overlay-controls .shiny-input-container:nth-child(3) { flex: 0 0 96px; min-width: 96px; max-width: 96px; }
+/* Day — fit "31" */
+.overlay-controls .shiny-input-container:nth-child(4) { flex: 0 0 48px; min-width: 48px; max-width: 48px; }
+/* Year — fit "2026" (4 digits + padding) */
+.overlay-controls .shiny-input-container:nth-child(5) { flex: 0 0 80px; min-width: 80px; max-width: 80px; }
 /* Hide all labels */
 .overlay-controls label { display: none !important; }
 /* Ensure selectize search bar matches dropdown height — compact */
