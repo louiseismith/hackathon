@@ -205,8 +205,8 @@ _CLICK_JS = """<script>
 
 def _build_folium_map(boundaries, risk_by_cd, layer_label):
     m = folium.Map(
-        location=[40.73, -73.98],
-        zoom_start=11,
+        location=[40.70, -73.94],
+        zoom_start=10,
         tiles="CartoDB positron",
         prefer_canvas=True,
         zoom_control=False,
