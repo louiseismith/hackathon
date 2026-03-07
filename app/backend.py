@@ -57,8 +57,10 @@ def get_risk_data(date_str: str) -> list[dict]:
                     h.cd_id,
                     cd.borough,
                     cd.neighborhood,
-                    AVG(h.heat_index_risk)     AS heat_index_risk,
+                    AVG(h.heat_index_risk)      AS heat_index_risk,
                     AVG(hc.total_capacity_pct) AS total_capacity_pct,
+                    AVG(hc.icu_capacity_pct)   AS icu_capacity_pct,
+                    AVG(hc.ed_wait_hours)      AS ed_wait_hours,
                     MAX(t.transit_delay_index) AS transit_delay_index
                 FROM heat_index h
                 JOIN community_districts cd ON cd.cd_id = h.cd_id
@@ -95,5 +97,49 @@ def get_date_range() -> dict:
             cur.execute("SELECT MIN(date), MAX(date) FROM heat_index")
             min_date, max_date = cur.fetchone()
         return {"min": str(min_date), "max": str(max_date)}
+    finally:
+        conn.close()
+
+
+def get_risk_series(cd_id: str, start_date: str, end_date: str) -> list[dict]:
+    """
+    Fetch 7-day average risk metrics for one CD over a date range (one row per date).
+    Returns a list of dicts with keys: date, heat_index_risk, total_capacity_pct,
+    icu_capacity_pct, ed_wait_hours, transit_delay_index.
+    """
+    conn = _get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    h.date,
+                    AVG(h.heat_index_risk)      AS heat_index_risk,
+                    AVG(hc.total_capacity_pct) AS total_capacity_pct,
+                    AVG(hc.icu_capacity_pct)   AS icu_capacity_pct,
+                    AVG(hc.ed_wait_hours)      AS ed_wait_hours,
+                    MAX(t.transit_delay_index) AS transit_delay_index
+                FROM heat_index h
+                JOIN hospital_capacity hc ON hc.cd_id = h.cd_id AND hc.date = h.date
+                JOIN transit_delays     t  ON t.cd_id  = h.cd_id AND t.date  = h.date
+                WHERE h.cd_id = %s
+                  AND h.date BETWEEN (%s::date - INTERVAL '6 days') AND %s::date
+                  AND h.date >= %s::date
+                GROUP BY h.date
+                ORDER BY h.date
+            """, (cd_id, start_date, end_date, start_date))
+            cols = [desc[0] for desc in cur.description]
+            rows = cur.fetchall()
+        def _clean(v):
+            if v is None:
+                return None
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return v
+
+        return [
+            {k: str(v) if k == "date" else _clean(v) for k, v in zip(cols, row)}
+            for row in rows
+        ]
     finally:
         conn.close()

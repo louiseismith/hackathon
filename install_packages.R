@@ -8,6 +8,7 @@ cran_packages <- c(
   "leaflet",
   "sf",        # requires system libraries: brew install gdal geos proj (macOS) or apt-get install libgdal-dev libgeos-dev libproj-dev (Linux)
   "dplyr",
+  "ggplot2",
   "reticulate",
   "viridisLite"
 )
