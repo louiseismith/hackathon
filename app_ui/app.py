@@ -307,7 +307,7 @@ def _stats_card_html(sc, risk_df, prev_df=None):
     header = (
         f'<div style="margin-bottom:2px;">'
         f'  <div style="font-size:13px;font-weight:700;color:#0f172a;">{name}</div>'
-        f'  <div style="font-size:10px;color:#64748b;margin-top:1px;">{_esc(cd_id)}</div>'
+        f'  <div style="font-size:10px;color:#64748b;margin-top:1px;">{_esc(cd_id)} (Last 7 days)<span style="font-size:9px;color:#94a3b8;"></span></div>'
         f'</div>'
     )
 
@@ -398,7 +398,10 @@ def _stats_card_html(sc, risk_df, prev_df=None):
 
 
 def _top_risk_html(risk_df, layer_info):
-    hdr = '<div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">Top Communities At Risk</div>'
+    hdr = ('<div style="font-size:11px;font-weight:700;color:#0f172a;margin-bottom:4px;">'
+           'Top Communities At Risk '
+           '<span style="font-size:9px;font-weight:400;color:#64748b;">(Past 7 days)</span>'
+           '</div>')
     unit = layer_info.get("unit", "")
     metric_lbl = layer_info["label"]
 
@@ -1381,10 +1384,10 @@ app_ui = ui.page_fillable(
                 ui.output_ui("cd_stats"),
                 ui.div(
                     ui.HTML(
-                        "<strong>Heat Index Risk</strong>: risk of dangerous outdoor heat conditions. "
-                        "<br><strong>Hospital Capacity</strong>: how full local hospitals and ICUs are. "
-                        "<br><strong>Transit Delay Index</strong>: typical transit slowdowns affecting access to care. "
-                        "<br><strong>Composite Score</strong>: combined index of heat, hospital, and transit risk (higher = more risk)."
+                        "<strong>Heat Index Risk</strong>: Risk of dangerous outdoor heat conditions using temperature and humidity (1-100 scale). "
+                        "<br><strong>Hospital Capacity</strong>: Percent of hospital beds occupied. "
+                        "<br><strong>Transit Delay Index</strong>: Index of infrastructure quality and disruption (1-100 scale). "
+                        "<br><strong>Composite Score</strong>: Combined index of heat, hospital, and transit risk (higher = more risk). "
                         "<br><span style='font-size:7.5px;color:#64748b;margin-top:3px;display:inline-block;'>*Values shown on the map are 7-day rolling averages.</span>"
                     ),
                     class_="risk-layer-note",
