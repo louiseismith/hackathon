@@ -1098,27 +1098,28 @@ button#prompt4:hover, button#prompt5:hover {
 .cd-panel .ai-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
 .cd-panel-summary { border-left-color: #e05c2a; }
 .cd-panel-recs    { border-left-color: #2a7ae0; }
-#ai_summary_tab { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
+#ai_summary_wrapper { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
 
-/* Loading affordance for AI report */
-.loading-affordance {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    font-size: 11px;
-    color: #64748b;
+/* AI Summary skeleton overlay */
+.ai-summary-skeleton {
+    position: absolute;
+    inset: 0;
+    background: #fff;
+    z-index: 20;
+    display: none;
+    padding: 8px 0;
 }
-.loading-spinner {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #e2e8f0;
-    border-top-color: #2563eb;
-    border-radius: 50%;
-    animation: loading-spin 0.8s linear infinite;
+.ai-summary-skeleton.visible { display: block; }
+.skel-block {
+    border-radius: 4px;
+    background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.4s infinite linear;
+    margin-bottom: 6px;
 }
-@keyframes loading-spin {
-    to { transform: rotate(360deg); }
+@keyframes skel-shimmer {
+    from { background-position: 200% 0; }
+    to   { background-position: -200% 0; }
 }
 
 /* Typing dots indicator */
@@ -1185,9 +1186,30 @@ app_ui = ui.page_fillable(
                 ui.nav_panel(
                     "AI Summary",
                     ui.div(
-                        ui.output_ui("ai_summary_loading_ui"),
                         ui.output_ui("ai_summary_tab"),
-                        id="ai_summary_tab",
+                        ui.HTML("""
+                        <div class="ai-summary-skeleton" id="ai-summary-skeleton">
+                          <div class="skel-block" style="height:11px;width:48%;"></div>
+                          <div class="skel-block" style="height:9px;width:22%;margin-bottom:14px;"></div>
+                          <div class="skel-block" style="height:90px;width:100%;border-radius:5px;margin-bottom:10px;"></div>
+                          <div class="skel-block" style="height:90px;width:100%;border-radius:5px;"></div>
+                        </div>
+                        <script>
+                        (function() {
+                          $(document).on('shiny:recalculating', function(e) {
+                            if (e.target.id === 'ai_summary_tab') {
+                              $('#ai-summary-skeleton').addClass('visible');
+                            }
+                          });
+                          $(document).on('shiny:value shiny:error', function(e) {
+                            if (e.target.id === 'ai_summary_tab') {
+                              $('#ai-summary-skeleton').removeClass('visible');
+                            }
+                          });
+                        })();
+                        </script>
+                        """),
+                        id="ai_summary_wrapper",
                         style="position:relative;",
                     ),
                 ),
@@ -1330,7 +1352,6 @@ def server(input, output, session):
     chat_msgs     = reactive.Value([])
     chat_history  = reactive.Value(None)   # PydanticAI ModelMessage history
     is_typing         = reactive.Value(False)
-    ai_summary_loading = reactive.Value(False)
     search_error  = reactive.Value("")
     _default_date = max(DATE_MIN, min(DATE_MAX, pd.Timestamp("2026-03-06").date()))
     applied_date  = reactive.Value(_default_date)
@@ -1557,24 +1578,9 @@ def server(input, output, session):
     # ---- AI Summary tab ------------------------------------------------------
 
     @render.ui
-    def ai_summary_loading_ui():
-        if not ai_summary_loading():
-            return ui.HTML("")
-        return ui.div(
-            ui.HTML(
-                '<div class="loading-affordance">'
-                '<div class="loading-spinner"></div>'
-                '<span>Loading AI report...</span>'
-                '</div>'
-            ),
-            style="padding:16px;text-align:center;",
-        )
-
-    @render.ui
     async def ai_summary_tab():
         sc = selected_cd()
         if not sc or not sc.get("cd_id"):
-            ai_summary_loading.set(False)
             return ui.div(
                 ui.p(
                     "Click a district on the map or use search to load its AI summary.",
@@ -1586,44 +1592,40 @@ def server(input, output, session):
         name     = sc.get("neighborhood") or cd_id
         date_str = str(applied_date())
 
-        ai_summary_loading.set(True)
+        loop = asyncio.get_event_loop()
         try:
-            loop = asyncio.get_event_loop()
-            try:
-                summary = await loop.run_in_executor(
-                    _CHAT_EXECUTOR, lambda: run_cd_summary(cd_id, date_str)
-                )
-            except Exception as e:
-                summary = f"Error generating summary: {e}"
-
-            try:
-                recs = await loop.run_in_executor(
-                    _CHAT_EXECUTOR, lambda: run_cd_recommendations(cd_id, date_str)
-                )
-            except Exception as e:
-                recs = f"Error generating decision signals: {e}"
-
-            header = ui.div(
-                ui.tags.strong(name, style="font-size:12px;color:#0f172a;"),
-                ui.p(cd_id, style="font-size:10px;color:#64748b;margin:1px 0 6px;"),
+            summary = await loop.run_in_executor(
+                _CHAT_EXECUTOR, lambda: run_cd_summary(cd_id, date_str)
             )
-            return ui.div(
-                header,
-                ui.div(
-                    ui.tags.h5("Risk Overview"),
-                    ui.div(ui.HTML(md_lib.markdown(summary, extensions=["tables", "nl2br"])),
-                           class_="ai-content"),
-                    class_="cd-panel cd-panel-summary",
-                ),
-                ui.div(
-                    ui.tags.h5("Decision Signals"),
-                    ui.div(ui.HTML(md_lib.markdown(recs, extensions=["tables", "nl2br"])),
-                           class_="ai-content"),
-                    class_="cd-panel cd-panel-recs",
-                ),
+        except Exception as e:
+            summary = f"Error generating summary: {e}"
+
+        try:
+            recs = await loop.run_in_executor(
+                _CHAT_EXECUTOR, lambda: run_cd_recommendations(cd_id, date_str)
             )
-        finally:
-            ai_summary_loading.set(False)
+        except Exception as e:
+            recs = f"Error generating decision signals: {e}"
+
+        header = ui.div(
+            ui.tags.strong(name, style="font-size:12px;color:#0f172a;"),
+            ui.p(cd_id, style="font-size:10px;color:#64748b;margin:1px 0 6px;"),
+        )
+        return ui.div(
+            header,
+            ui.div(
+                ui.tags.h5("Risk Overview"),
+                ui.div(ui.HTML(md_lib.markdown(summary, extensions=["tables", "nl2br"])),
+                       class_="ai-content"),
+                class_="cd-panel cd-panel-summary",
+            ),
+            ui.div(
+                ui.tags.h5("Decision Signals"),
+                ui.div(ui.HTML(md_lib.markdown(recs, extensions=["tables", "nl2br"])),
+                       class_="ai-content"),
+                class_="cd-panel cd-panel-recs",
+            ),
+        )
 
     # ---- Chat ----------------------------------------------------------------
 
