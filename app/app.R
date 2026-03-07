@@ -81,10 +81,21 @@ ui <- navbarPage(
             min   = date_range$min,
             max   = date_range$max
           ),
-          selectInput(
-            "selected_metric", "Risk Layer",
-            choices = setNames(names(METRICS), sapply(METRICS, `[[`, "label")),
-            selected = "heat_index_risk"
+          checkboxGroupInput(
+            "selected_metrics", "Risk Factors",
+            choiceNames  = unname(sapply(METRICS, `[[`, "label")),
+            choiceValues = names(METRICS),
+            selected     = names(METRICS)
+          ),
+          conditionalPanel(
+            condition = "input.selected_metrics.length > 1",
+            div(
+              style = "font-size: 11px; color: #666; margin-top: 6px; margin-bottom: 4px; line-height: 1.4;",
+              tags$em(
+                "Combined score: each factor is normalized to 0-100 within its typical range,
+                 then averaged equally. Higher = greater risk."
+              )
+            )
           ),
           hr(),
           h4("Top Risk Neighborhoods"),
@@ -167,8 +178,38 @@ server <- function(input, output, session) {
     cd_boundaries |> left_join(df, by = "cd_id")
   })
 
-  metric_info <- reactive({
-    METRICS[[input$selected_metric]]
+  # Normalize a vector to 0-100 given a domain
+  normalize_metric <- function(vals, domain) {
+    lo <- domain[1]; hi <- domain[2]
+    pmin(pmax((vals - lo) / (hi - lo) * 100, 0), 100)
+  }
+
+  # Display metadata: single metric or composite
+  display_info <- reactive({
+    sel <- input$selected_metrics
+    req(length(sel) >= 1)
+    if (length(sel) == 1) {
+      mi <- METRICS[[sel]]
+      list(type = "single", label = mi$label, domain = mi$domain, unit = mi$unit, col = mi$col)
+    } else {
+      list(type = "composite", label = "Combined Risk Score", domain = c(0, 100), unit = "/ 100")
+    }
+  })
+
+  # Spatial data with display_val column added
+  composite_data <- reactive({
+    df  <- map_data()
+    sel <- input$selected_metrics
+    req(length(sel) >= 1)
+    if (length(sel) == 1) {
+      df$display_val <- as.numeric(df[[METRICS[[sel]]$col]])
+    } else {
+      normed <- sapply(sel, function(m) {
+        normalize_metric(as.numeric(df[[METRICS[[m]]$col]]), METRICS[[m]]$domain)
+      })
+      df$display_val <- rowMeans(normed, na.rm = TRUE)
+    }
+    df
   })
 
   # Base map (render once)
@@ -178,20 +219,36 @@ server <- function(input, output, session) {
       setView(lng = -73.98, lat = 40.73, zoom = 11)
   })
 
-  # Update polygons when data or metric changes
+  # Update polygons when data or metric selection changes
   observe({
-    md    <- map_data()
-    mi    <- metric_info()
-    col   <- mi$col
-    vals  <- as.numeric(md[[col]])
-    pal   <- colorNumeric("RdYlGn", domain = mi$domain, reverse = TRUE, na.color = "#cccccc")
+    cd   <- composite_data()
+    di   <- display_info()
+    vals <- cd$display_val
+    pal  <- colorNumeric("RdYlGn", domain = di$domain, reverse = TRUE, na.color = "#cccccc")
 
-    labels <- sprintf(
-      "<strong>%s</strong><br/>%s: <b>%.1f</b> %s",
-      md$neighborhood, mi$label, vals, mi$unit
-    ) |> lapply(htmltools::HTML)
+    if (di$type == "single") {
+      labels <- sprintf(
+        "<strong>%s</strong><br/>%s: <b>%.1f</b> %s",
+        cd$neighborhood, di$label, vals, di$unit
+      ) |> lapply(htmltools::HTML)
+    } else {
+      sel <- input$selected_metrics
+      labels <- lapply(seq_len(nrow(cd)), function(i) {
+        detail <- paste(sapply(sel, function(m) {
+          sprintf("%s: %.1f %s",
+                  METRICS[[m]]$label,
+                  as.numeric(cd[[METRICS[[m]]$col]][i]),
+                  METRICS[[m]]$unit)
+        }), collapse = "<br/>")
+        htmltools::HTML(paste0(
+          "<strong>", cd$neighborhood[i], "</strong><br/>",
+          "Combined Risk: <b>", round(vals[i], 1), "</b> / 100<br/>",
+          detail
+        ))
+      })
+    }
 
-    leafletProxy("risk_map", data = md) |>
+    leafletProxy("risk_map", data = cd) |>
       clearShapes() |>
       addPolygons(
         fillColor   = ~pal(vals),
@@ -200,12 +257,12 @@ server <- function(input, output, session) {
         weight      = 1,
         opacity     = 1,
         highlightOptions = highlightOptions(
-          weight      = 2,
-          color       = "#333",
-          fillOpacity = 0.9,
+          weight       = 2,
+          color        = "#333",
+          fillOpacity  = 0.9,
           bringToFront = TRUE
         ),
-        label       = labels,
+        label        = labels,
         labelOptions = labelOptions(
           style     = list("font-weight" = "normal", padding = "4px 8px"),
           textsize  = "13px",
@@ -214,24 +271,22 @@ server <- function(input, output, session) {
       ) |>
       addLegend(
         "bottomright",
-        pal    = pal,
-        values = mi$domain,
-        title  = mi$label,
+        pal     = pal,
+        values  = di$domain,
+        title   = di$label,
         layerId = "legend"
       )
   })
 
   # Top 10 risk table
   output$risk_table <- renderTable({
-    df  <- risk_data()
-    mi  <- metric_info()
-    col <- mi$col
-    df |>
-      arrange(desc(.data[[col]])) |>
+    cd <- composite_data()
+    sf::st_drop_geometry(cd) |>
+      arrange(desc(display_val)) |>
       head(10) |>
       transmute(
         Neighborhood = neighborhood,
-        Score = round(.data[[col]], 1)
+        Score = round(display_val, 1)
       )
   }, striped = TRUE, hover = TRUE, bordered = FALSE, class = "risk-table")
 }
