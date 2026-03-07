@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 
 import pandas as pd
-import psycopg2
+from sqlalchemy import create_engine, text
 from dotenv import load_dotenv
 
 # Load .env from hackathon root
@@ -14,16 +14,14 @@ load_dotenv(_THIS_DIR.parent.parent / ".env")
 load_dotenv()  # fallback to cwd
 
 
-def _get_conn():
-    return psycopg2.connect(
-        host=os.getenv("SUPABASE_HOST"),
-        port=int(os.getenv("SUPABASE_PORT", "5432")),
-        dbname=os.getenv("SUPABASE_DB", "postgres"),
-        user=os.getenv("SUPABASE_USER", "postgres"),
-        password=os.getenv("SUPABASE_PASSWORD", ""),
-        connect_timeout=10,
-        sslmode="require",
-    )
+def _get_engine():
+    host     = os.getenv("SUPABASE_HOST")
+    port     = os.getenv("SUPABASE_PORT", "5432")
+    dbname   = os.getenv("SUPABASE_DB", "postgres")
+    user     = os.getenv("SUPABASE_USER", "postgres")
+    password = os.getenv("SUPABASE_PASSWORD", "")
+    url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{dbname}?sslmode=require&connect_timeout=10"
+    return create_engine(url)
 
 
 # Base SELECT joining all four tables into one flat row per (cd, date)
@@ -42,11 +40,13 @@ _BASE_SELECT = """
 
 
 def _run(sql: str, params: list) -> pd.DataFrame:
-    conn = _get_conn()
-    try:
-        df = pd.read_sql_query(sql, conn, params=params)
-    finally:
-        conn.close()
+    # Convert %s placeholders to SQLAlchemy named params (:p0, :p1, ...)
+    for i in range(len(params)):
+        sql = sql.replace("%s", f":p{i}", 1)
+    engine = _get_engine()
+    with engine.connect() as conn:
+        df = pd.read_sql_query(text(sql), conn,
+                               params={f"p{i}": v for i, v in enumerate(params)})
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
     return df
@@ -91,6 +91,38 @@ def query_for_date_range(start_date: str, end_date: str, cd_id: str | None = Non
         where.append("cd.borough ILIKE %s")
         params.append(borough)
     return _run(_BASE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY h.date", params)
+
+
+def query_monthly_baseline(cd_id: str, month: int, exclude_date: str, current_values: dict | None = None) -> dict:
+    """Percentile distribution for a CD for a specific calendar month across all years, excluding today.
+
+    Returns p50/p90 for each metric, plus the percentile rank of each current value if provided.
+    """
+    sql = (
+        _BASE_SELECT
+        + " WHERE h.cd_id = %s AND EXTRACT(MONTH FROM h.date) = %s AND h.date != %s"
+    )
+    df = _run(sql, [cd_id, month, exclude_date])
+    if df.empty:
+        return {}
+
+    result: dict = {"years_of_data": int(df["date"].dt.year.nunique())}
+
+    _metrics = [
+        ("heat_index_risk",    "heat_index_risk"),
+        ("total_capacity_pct", "total_capacity_pct"),
+        ("transit_delay_index","transit_delay_index"),
+        ("ed_wait_hours",      "ed_wait_hours"),
+    ]
+    for key, col in _metrics:
+        result[f"{key}_p50"] = round(float(df[col].quantile(0.50)), 2)
+        result[f"{key}_p90"] = round(float(df[col].quantile(0.90)), 2)
+        if current_values and key in current_values:
+            result[f"{key}_percentile"] = round(
+                float((df[col] <= current_values[key]).mean() * 100), 1
+            )
+
+    return result
 
 
 def query_full_history(cd_id: str | None = None, borough: str | None = None) -> pd.DataFrame:

@@ -15,6 +15,7 @@ from .data_loader import (
     query_for_two_dates,
     query_for_date_range,
     query_full_history,
+    query_monthly_baseline,
 )
 from .analogs import get_historical_analogs
 
@@ -135,8 +136,21 @@ def get_cd_snapshot(cd_id: str, date_str: str) -> dict:
     r = df.iloc[0]
     heat_risk = float(r["heat_index_risk"])
     cap       = float(r["total_capacity_pct"])
+    ed_wait   = float(r["ed_wait_hours"])
     trans     = float(r["transit_delay_index"])
-    return {
+
+    month = pd.to_datetime(date_str).month
+    baseline = query_monthly_baseline(
+        cd_id, month, date_str,
+        current_values={
+            "heat_index_risk":    heat_risk,
+            "total_capacity_pct": cap,
+            "transit_delay_index": trans,
+            "ed_wait_hours":      ed_wait,
+        },
+    )
+
+    snapshot = {
         "cd_id": cd_id,
         "borough": str(r["borough"]),
         "community_district": int(r["community_district"]),
@@ -146,11 +160,31 @@ def get_cd_snapshot(cd_id: str, date_str: str) -> dict:
         "temperature_f": round(float(r["temperature_f"]), 2),
         "humidity_pct": round(float(r["humidity_pct"]), 2),
         "total_capacity_pct": round(cap, 2),
-        "ed_wait_hours": round(float(r["ed_wait_hours"]), 2),
+        "ed_wait_time_hours": round(ed_wait, 2),
         "transit_delay_index": round(trans, 2),
         "primary_concern": _primary_concern(heat_risk, cap, trans),
         **_driver_fields(heat_risk, cap, trans),
     }
+
+    if baseline:
+        snapshot["monthly_context"] = {
+            "month": month,
+            "years_of_data": baseline["years_of_data"],
+            "heat_index_risk_p50":        baseline["heat_index_risk_p50"],
+            "heat_index_risk_p90":        baseline["heat_index_risk_p90"],
+            "heat_index_risk_percentile": baseline.get("heat_index_risk_percentile"),
+            "total_capacity_pct_p50":        baseline["total_capacity_pct_p50"],
+            "total_capacity_pct_p90":        baseline["total_capacity_pct_p90"],
+            "total_capacity_pct_percentile": baseline.get("total_capacity_pct_percentile"),
+            "transit_delay_index_p50":        baseline["transit_delay_index_p50"],
+            "transit_delay_index_p90":        baseline["transit_delay_index_p90"],
+            "transit_delay_index_percentile": baseline.get("transit_delay_index_percentile"),
+            "ed_wait_time_hours_p50":        baseline["ed_wait_hours_p50"],
+            "ed_wait_time_hours_p90":        baseline["ed_wait_hours_p90"],
+            "ed_wait_time_hours_percentile": baseline.get("ed_wait_hours_percentile"),
+        }
+
+    return snapshot
 
 
 # --- Tool 2: get_top_risk_cds ---
@@ -358,37 +392,53 @@ def get_agency_coordination_recommendations(cd_id: str, date_str: str) -> dict:
     hosp  = snap["total_capacity_pct"]
     trans = snap["transit_delay_index"]
 
+    ctx       = snap.get("monthly_context", {})
+    heat_pct  = ctx.get("heat_index_risk_percentile")
+    hosp_pct  = ctx.get("total_capacity_pct_percentile")
+    trans_pct = ctx.get("transit_delay_index_percentile")
+
+    # Percentile > 90 is the primary trigger; fall back to absolute thresholds when
+    # monthly_context is unavailable. Transit uses percentile only — absolute values
+    # are not comparable across CDs due to infrastructure baseline differences.
+    heat_elevated  = heat >= 10 and (
+        (heat_pct  is not None and heat_pct  > 90) or (heat_pct  is None and heat >= HEAT_HIGH)
+    )
+    hosp_elevated  = (
+        (hosp_pct  is not None and hosp_pct  > 90) or (hosp_pct  is None and hosp >= HOSPITAL_HIGH)
+    )
+    trans_elevated = trans_pct is not None and trans_pct > 90
+
     agencies = []
     reason   = []
     actions  = []
     urgency  = "moderate"
 
-    if heat >= HEAT_HIGH and hosp >= HOSPITAL_HIGH:
+    if heat_elevated and hosp_elevated:
         agencies = ["Emergency Management", "Public Health / Hospitals", "EMS / Urgent Care"]
         reason.append("High heat and hospital strain")
         actions.append("Coordinate cooling centers and hospital surge capacity")
         urgency = "high"
-    elif heat >= HEAT_HIGH and trans >= TRANSIT_HIGH:
+    elif heat_elevated and trans_elevated:
         agencies = ["Emergency Management", "Public Health", "Transit Ops"]
         reason.append("High heat and transit disruption")
         actions.append("Cooling centers and transit service communication")
         urgency = "high"
-    elif hosp >= HOSPITAL_HIGH and trans >= TRANSIT_HIGH:
+    elif hosp_elevated and trans_elevated:
         agencies = ["Transit Ops", "Emergency Management", "Public Health / Hospitals"]
         reason.append("Hospital strain and transit disruption")
         actions.append("Field logistics and service communication")
         urgency = "high"
-    elif heat >= HEAT_HIGH:
+    elif heat_elevated:
         agencies = ["Emergency Management", "Public Health"]
         reason.append("Elevated heat stress")
         actions.append("Cooling center / city services coordination")
         urgency = "elevated"
-    elif hosp >= HOSPITAL_HIGH:
+    elif hosp_elevated:
         agencies = ["Emergency Management", "Public Health / Hospitals"]
         reason.append("Hospital capacity strain")
         actions.append("Monitor ED wait times and surge capacity")
         urgency = "elevated"
-    elif trans >= TRANSIT_HIGH:
+    elif trans_elevated:
         agencies = ["Transit Ops", "Emergency Management"]
         reason.append("Transit disruption")
         actions.append("Field logistics / service communication")

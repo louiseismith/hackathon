@@ -9,14 +9,15 @@ import io
 import base64
 import copy
 import calendar
+import asyncio
+import concurrent.futures
 from pathlib import Path
+import markdown as md_lib
 
 import pandas as pd
 import numpy as np
 import folium
 from folium import Element
-from shapely.geometry import shape, mapping
-from shapely.ops import unary_union
 
 # ---------------------------------------------------------------------------
 # Path setup
@@ -39,7 +40,7 @@ for env_dir in (HACKATHON_ROOT, HACKATHON_ROOT.parent):
 
 from shiny import App, ui, render, reactive
 from backend import get_risk_data, get_date_range, get_risk_series, borocd_to_cd_id
-from chatbot.agent import run_chat
+from chatbot.agent import run_chat, run_cd_summary, run_cd_recommendations
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -60,13 +61,6 @@ METRICS = {
     "transit_delay_index": {"label": "Transit Delay Index", "col": "transit_delay_index", "domain": (0, 60)},
 }
 
-BOROUGH_COLORS = {
-    "Manhattan":     "#3b82f6",  # blue
-    "Brooklyn":      "#f97316",  # orange
-    "Queens":        "#a855f7",  # purple
-    "Bronx":         "#10b981",  # green
-    "Staten Island": "#06b6d4",  # cyan
-}
 
 _MNAMES = [
     "January", "February", "March", "April", "May", "June",
@@ -117,6 +111,11 @@ _dseq      = pd.date_range(DATE_MIN, DATE_MAX, freq="D")
 MONTHS_ORD = [_MNAMES[m - 1] for m in sorted(_dseq.month.unique())]
 YEARS_ORD  = [str(y) for y in sorted(_dseq.year.unique().tolist())]
 
+# Type-ahead choices: blank placeholder entry first, then CDs sorted borough → neighborhood
+CD_CHOICES: dict[str, str] = {"": ""}
+for _, _r in CD_LOOKUP.sort_values(["borough", "neighborhood"]).iterrows():
+    CD_CHOICES[_r["cd_id"]] = f"{_r['neighborhood']}  ({_r['cd_id']}) — {_r['borough']}"
+
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
@@ -128,15 +127,15 @@ def normalize_metric(vals, domain):
     return np.clip((pd.Series(vals).astype(float) - lo) / (hi - lo) * 100, 0, 100).tolist()
 
 
+import matplotlib.cm as _plasma_cm
+import matplotlib.colors as _mcolors
+
 def _val_color(v):
-    """Map a 0-100 display value to a fill color for the choropleth."""
+    """Map a 0-100 display value to a plasma fill color (color-blind accessible)."""
     if v is None:
         return "#cccccc"
-    v = float(v)
-    if v <= 25: return "#2ecc71"
-    if v <= 50: return "#f1c40f"
-    if v <= 75: return "#e67e22"
-    return "#e74c3c"
+    rgba = _plasma_cm.plasma(float(v) / 100.0)
+    return _mcolors.to_hex(rgba)
 
 
 def _dot_color(risk):
@@ -203,25 +202,6 @@ _CLICK_JS = """<script>
 </script>"""
 
 
-def _build_borough_outlines(boundaries):
-    """Dissolve CD polygons by borough → GeoJSON FeatureCollection for outline layer."""
-    groups = {}
-    for feat in boundaries["features"]:
-        borough = feat["properties"].get("borough", "")
-        if not borough:
-            continue
-        geom = shape(feat["geometry"])
-        groups.setdefault(borough, []).append(geom)
-    features = []
-    for borough, geoms in groups.items():
-        dissolved = unary_union(geoms)
-        features.append({
-            "type": "Feature",
-            "properties": {"borough": borough},
-            "geometry": mapping(dissolved),
-        })
-    return {"type": "FeatureCollection", "features": features}
-
 
 def _build_folium_map(boundaries, risk_by_cd, layer_label):
     m = folium.Map(
@@ -256,19 +236,6 @@ def _build_folium_map(boundaries, risk_by_cd, layer_label):
             aliases=["Borough:", "Community District:", "CD ID:", f"{layer_label}:"],
             style="font-family:system-ui;font-size:13px;",
         ),
-    ).add_to(m)
-
-    # Borough outline layer — each borough in its own color
-    borough_gj = _build_borough_outlines(boundaries)
-    folium.GeoJson(
-        borough_gj,
-        style_function=lambda f: {
-            "fillColor":   "none",
-            "fillOpacity": 0,
-            "color":       BOROUGH_COLORS.get(f["properties"].get("borough", ""), "#1e293b"),
-            "weight":      2.5,
-        },
-        interactive=False,
     ).add_to(m)
 
     m.get_root().html.add_child(Element(_CLICK_JS))
@@ -549,7 +516,7 @@ def _legend_html(layer_info):
         f'<div style="{css}">'
         f'<div style="font-weight:700;font-size:12px;color:#0f172a;margin-bottom:6px;">{_esc(label)}</div>'
         f'<div style="height:10px;border-radius:5px;'
-        f'background:linear-gradient(to right,#2ecc71,#f1c40f,#e67e22,#e74c3c);"></div>'
+        f'background:linear-gradient(to right,#0d0887,#7e03a8,#cc4778,#f89441,#f0f921);"></div>'
         f'<div style="display:flex;justify-content:space-between;margin-top:3px;">'
         f'  <span style="font-size:11px;color:#64748b;">{_esc(lo_lbl)}</span>'
         f'  <span style="font-size:11px;color:#64748b;">{_esc(hi_lbl)}</span>'
@@ -652,6 +619,57 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
     width: 100% !important;
 }
+/* Selectize type-ahead — match pill style */
+.overlay-controls .selectize-input {
+    background: #ffffff !important;
+    border-radius: 10px !important;
+    font-size: 13px !important;
+    min-height: 38px !important;
+    height: 38px !important;
+    line-height: 28px !important;
+    padding: 4px 12px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.08) !important;
+    cursor: text !important;
+    display: flex !important;
+    align-items: center !important;
+}
+.overlay-controls .selectize-input.has-items {
+    height: auto !important;
+    flex-wrap: wrap !important;
+    gap: 3px !important;
+    padding: 4px 8px !important;
+}
+.overlay-controls .selectize-input .item {
+    background: #eff6ff !important;
+    border: 1px solid #bfdbfe !important;
+    border-radius: 6px !important;
+    color: #1d4ed8 !important;
+    font-size: 12px !important;
+    padding: 1px 6px !important;
+}
+.overlay-controls .selectize-input.focus {
+    border-color: #2563eb !important;
+    box-shadow: 0 0 0 2px rgba(37,99,235,0.15) !important;
+}
+.overlay-controls .selectize-dropdown {
+    border-radius: 10px !important;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.12) !important;
+    font-size: 13px !important;
+    border: 1px solid rgba(0,0,0,0.08) !important;
+    margin-top: 4px !important;
+    overflow: hidden !important;
+}
+.overlay-controls .selectize-dropdown .option {
+    padding: 7px 12px !important;
+    cursor: pointer !important;
+}
+.overlay-controls .selectize-dropdown .option:hover,
+.overlay-controls .selectize-dropdown .option.active {
+    background: #eff6ff !important;
+    color: #1d4ed8 !important;
+}
+
 /* Search button */
 .overlay-controls .action-button {
     flex-shrink: 0;
@@ -694,6 +712,25 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     max-width: 380px;
 }
 
+/* Markdown tables inside chat bubbles */
+.chat-bubble-bot table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 12px;
+    margin: 6px 0;
+}
+.chat-bubble-bot th, .chat-bubble-bot td {
+    border: 1px solid #cbd5e1;
+    padding: 5px 8px;
+    text-align: left;
+}
+.chat-bubble-bot th {
+    background: rgba(0,0,0,0.06);
+    font-weight: 600;
+}
+.chat-bubble-bot p { margin: 4px 0; }
+.chat-bubble-bot strong { font-weight: 700; }
+
 /* Chat bubbles */
 .chat-bubble-user {
     background: #2563eb; color: white;
@@ -708,6 +745,37 @@ html, body { font-family: system-ui, -apple-system, sans-serif; margin: 0; paddi
     margin-right: 20%; margin-bottom: 6px;
 }
 .chat-area { max-height: 360px; overflow-y: auto; padding: 4px; margin-bottom: 8px; }
+
+/* AI Summary tab panels */
+.cd-panel {
+    background: #f8fafc; border-left: 4px solid #6c757d;
+    border-radius: 6px; padding: 14px 16px; margin-bottom: 12px;
+}
+.cd-panel h5 {
+    font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.07em; color: #64748b; margin: 0 0 8px 0;
+}
+.cd-panel .ai-content { font-size: 13px; line-height: 1.65; color: #1e293b; }
+.cd-panel .ai-content p { margin: 4px 0; }
+.cd-panel .ai-content table { border-collapse: collapse; width: 100%; font-size: 12px; margin: 6px 0; }
+.cd-panel .ai-content th, .cd-panel .ai-content td { border: 1px solid #e2e8f0; padding: 4px 7px; }
+.cd-panel .ai-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
+.cd-panel-summary { border-left-color: #e05c2a; }
+.cd-panel-recs    { border-left-color: #2a7ae0; }
+#ai_summary_tab { overflow-y: auto; max-height: calc(100vh - 120px); padding-top: 8px; }
+
+/* Typing dots indicator */
+.typing-indicator { display: flex; align-items: center; gap: 4px; padding: 10px 14px; }
+.typing-indicator span {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: #64748b; animation: typing-bounce 1.2s infinite ease-in-out;
+}
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.6; }
+    30% { transform: translateY(-6px); opacity: 1; }
+}
 """
 
 # ---------------------------------------------------------------------------
@@ -742,6 +810,13 @@ app_ui = ui.page_fillable(
                         class_="btn btn-outline-primary btn-sm w-100 mb-1",
                         style="text-align:left;white-space:normal;"),
                     ui.hr(),
+                    ui.div(
+                        ui.input_action_button(
+                            "clear_chat", "Clear chat",
+                            class_="btn btn-outline-secondary btn-sm",
+                            style="font-size:11px;padding:2px 10px;"),
+                        style="text-align:right;margin-bottom:4px;",
+                    ),
                     ui.output_ui("chat_messages_ui"),
                     ui.input_text(
                         "chat_input", None,
@@ -749,6 +824,10 @@ app_ui = ui.page_fillable(
                     ui.input_action_button(
                         "chat_send", "Send",
                         class_="btn btn-primary btn-sm w-100 mt-1"),
+                ),
+                ui.nav_panel(
+                    "AI Summary",
+                    ui.div(ui.output_ui("ai_summary_tab"), id="ai_summary_tab"),
                 ),
             ),
             width=320,
@@ -759,13 +838,25 @@ app_ui = ui.page_fillable(
             ui.div(ui.output_ui("map_html"), class_="map-iframe-wrap"),
             # Floating control bar overlaid on map
             ui.div(
-                ui.input_text(
+                ui.input_selectize(
                     "search_cd", None,
-                    placeholder="Search your community district...", width="100%"),
-                ui.input_select(
-                    "risk_layer", None,
-                    choices={k: v["label"] for k, v in RISK_LAYERS.items()},
-                    width="100%"),
+                    choices=CD_CHOICES,
+                    selected="",
+                    width="100%",
+                    options={
+                        "placeholder": "Search your community district...",
+                        "allowEmptyOption": True,
+                        "maxOptions": 80,
+                    },
+                ),
+                ui.input_selectize(
+                    "risk_factors", None,
+                    choices={k: v["label"] for k, v in METRICS.items()},
+                    selected=list(METRICS.keys()),
+                    multiple=True,
+                    width="100%",
+                    options={"placeholder": "Select risk factors...", "plugins": ["remove_button"]},
+                ),
                 ui.input_select(
                     "sel_month", None,
                     choices=MONTHS_ORD,
@@ -779,9 +870,6 @@ app_ui = ui.page_fillable(
                     choices=YEARS_ORD,
                     selected=YEARS_ORD[-1] if YEARS_ORD else None,
                     width="100%"),
-                ui.input_action_button(
-                    "btn_search", "Search",
-                    class_="btn btn-primary btn-sm action-button"),
                 class_="overlay-controls",
             ),
             # Stats card (top right)
@@ -805,8 +893,9 @@ app_ui = ui.page_fillable(
 
 def server(input, output, session):
 
-    selected_cd = reactive.Value(None)
-    chat_msgs   = reactive.Value([])
+    selected_cd  = reactive.Value(None)
+    chat_msgs    = reactive.Value([])
+    is_typing    = reactive.Value(False)
 
     # ---- Date ----------------------------------------------------------------
 
@@ -844,18 +933,38 @@ def server(input, output, session):
             return pd.DataFrame()
 
     @reactive.calc
+    def active_layer():
+        """Return (layer_str, layer_info) based on selected risk factors.
+        Single factor → that metric; multiple → combined risk index."""
+        factors = [f for f in (input.risk_factors() or ()) if f in METRICS]
+        if not factors:
+            factors = list(METRICS.keys())
+        if len(factors) == 1:
+            f = factors[0]
+            return f, RISK_LAYERS[f]
+        return "composite", {
+            "label":  "Combined Risk Index",
+            "col":    "composite",
+            "domain": (0, 100),
+            "unit":   "/ 100",
+        }
+
+    @reactive.calc
     def composite_data():
-        df    = risk_data().copy()
-        layer = input.risk_layer()
-        if df.empty or not layer:
+        df = risk_data().copy()
+        if df.empty:
             return df
+        layer, li = active_layer()
         if layer == "composite":
-            for mk, mv in METRICS.items():
-                df[mk + "_n"] = normalize_metric(df[mv["col"]].tolist(), mv["domain"])
-            df["display_val"] = df[[mk + "_n" for mk in METRICS]].mean(axis=1)
+            factors = [f for f in (input.risk_factors() or ()) if f in METRICS]
+            if not factors:
+                factors = list(METRICS.keys())
+            for f in factors:
+                mv = METRICS[f]
+                df[f + "_n"] = normalize_metric(df[mv["col"]].tolist(), mv["domain"])
+            df["display_val"] = df[[f + "_n" for f in factors]].mean(axis=1)
         else:
-            col = RISK_LAYERS[layer]["col"]
-            df["display_val"] = pd.to_numeric(df[col], errors="coerce")
+            df["display_val"] = pd.to_numeric(df[li["col"]], errors="coerce")
         return df
 
     # ---- Map click -----------------------------------------------------------
@@ -871,20 +980,14 @@ def server(input, output, session):
         if click and isinstance(click, dict) and click.get("cd_id"):
             selected_cd.set(dict(click))
 
-    # ---- Search --------------------------------------------------------------
+    # ---- Search (type-ahead selectize — auto-selects on pick) ----------------
 
     @reactive.effect
-    @reactive.event(input.btn_search)
     def _on_search():
-        q = (input.search_cd() or "").strip().lower()
-        if not q or CD_LOOKUP.empty:
+        cd_id = (input.search_cd() or "").strip()
+        if not cd_id or CD_LOOKUP.empty:
             return
-        mask = (
-            CD_LOOKUP["cd_id"].str.lower().eq(q) |
-            CD_LOOKUP["neighborhood"].str.lower().str.contains(q, na=False) |
-            CD_LOOKUP["borough"].str.lower().str.contains(q, na=False)
-        )
-        match = CD_LOOKUP[mask]
+        match = CD_LOOKUP[CD_LOOKUP["cd_id"] == cd_id]
         if not match.empty:
             r = match.iloc[0]
             selected_cd.set({
@@ -897,9 +1000,8 @@ def server(input, output, session):
 
     @render.ui
     def map_html():
-        cd    = composite_data()
-        layer = input.risk_layer()
-        li    = RISK_LAYERS[layer]
+        cd = composite_data()
+        _, li = active_layer()
         risk_by_cd = (
             cd.set_index("cd_id")["display_val"].to_dict()
             if not cd.empty and "display_val" in cd.columns
@@ -928,62 +1030,129 @@ def server(input, output, session):
 
     @render.ui
     def top_risk_ui():
-        li = RISK_LAYERS[input.risk_layer()]
+        _, li = active_layer()
         return ui.HTML(_top_risk_html(composite_data(), li))
 
     # ---- Trend ---------------------------------------------------------------
 
     @render.ui
     def trend_ui():
-        layer = input.risk_layer()
+        layer, li = active_layer()
         return ui.HTML(_trend_html(
-            selected_cd(), layer, RISK_LAYERS[layer], str(selected_date()), trend_days=30,
+            selected_cd(), layer, li, str(selected_date()), trend_days=30,
         ))
 
     # ---- Legend --------------------------------------------------------------
 
     @render.ui
     def legend_ui():
-        return ui.HTML(_legend_html(RISK_LAYERS[input.risk_layer()]))
+        _, li = active_layer()
+        return ui.HTML(_legend_html(li))
+
+    # ---- AI Summary tab ------------------------------------------------------
+
+    @render.ui
+    async def ai_summary_tab():
+        sc = selected_cd()
+        if not sc or not sc.get("cd_id"):
+            return ui.div(
+                ui.p(
+                    "Click a district on the map or use search to load its AI summary.",
+                    style="font-size:13px;color:#64748b;margin-top:12px;",
+                )
+            )
+
+        cd_id    = sc["cd_id"]
+        name     = sc.get("neighborhood") or cd_id
+        borough  = sc.get("borough", "")
+        date_str = str(selected_date())
+
+        header = ui.div(
+            ui.tags.strong(name, style="font-size:16px;color:#0f172a;"),
+            ui.p(f"{borough} | {cd_id}", style="font-size:12px;color:#64748b;margin:2px 0 10px;"),
+        )
+
+        loop = asyncio.get_event_loop()
+        try:
+            summary = await loop.run_in_executor(
+                _CHAT_EXECUTOR, lambda: run_cd_summary(cd_id, date_str)
+            )
+        except Exception as e:
+            summary = f"Error generating summary: {e}"
+
+        try:
+            recs = await loop.run_in_executor(
+                _CHAT_EXECUTOR, lambda: run_cd_recommendations(cd_id, date_str)
+            )
+        except Exception as e:
+            recs = f"Error generating decision signals: {e}"
+
+        return ui.div(
+            header,
+            ui.div(
+                ui.tags.h5("Risk Overview"),
+                ui.div(ui.HTML(md_lib.markdown(summary, extensions=["tables", "nl2br"])),
+                       class_="ai-content"),
+                class_="cd-panel cd-panel-summary",
+            ),
+            ui.div(
+                ui.tags.h5("Decision Signals"),
+                ui.div(ui.HTML(md_lib.markdown(recs, extensions=["tables", "nl2br"])),
+                       class_="ai-content"),
+                class_="cd-panel cd-panel-recs",
+            ),
+        )
 
     # ---- Chat ----------------------------------------------------------------
 
-    def _send_chat(msg):
+    async def _send_chat(msg):
         if not msg or not msg.strip():
             return
         chat_msgs.set(chat_msgs() + [{"role": "user", "content": msg}])
+        is_typing.set(True)
+        date_str = str(selected_date())
         try:
-            result   = run_chat(msg, current_date=str(selected_date()), message_history=None)
+            loop   = asyncio.get_event_loop()
+            result = await loop.run_in_executor(
+                _CHAT_EXECUTOR, lambda: run_chat(msg, date_str, None)
+            )
             response = result["response"]
         except Exception as e:
             response = f"Error: {e}"
+        finally:
+            is_typing.set(False)
         chat_msgs.set(chat_msgs() + [{"role": "assistant", "content": response}])
 
     @reactive.effect
+    @reactive.event(input.clear_chat)
+    def _on_clear_chat():
+        chat_msgs.set([])
+
+    @reactive.effect
     @reactive.event(input.chat_send)
-    def _on_chat_send():
-        _send_chat(input.chat_input())
+    async def _on_chat_send():
+        await _send_chat(input.chat_input())
         ui.update_text("chat_input", value="")
 
     @reactive.effect
     @reactive.event(input.prompt1)
-    def _p1():
-        _send_chat("Which neighborhoods show rising heat and hospital strain?")
+    async def _p1():
+        await _send_chat("Which neighborhoods show rising heat and hospital strain?")
 
     @reactive.effect
     @reactive.event(input.prompt2)
-    def _p2():
-        _send_chat("Where is risk accelerating the fastest?")
+    async def _p2():
+        await _send_chat("Where is risk accelerating the fastest?")
 
     @reactive.effect
     @reactive.event(input.prompt3)
-    def _p3():
-        _send_chat("How does today compare to similar historical patterns?")
+    async def _p3():
+        await _send_chat("How does today compare to similar historical patterns?")
 
     @reactive.effect
     @reactive.event(input.prompt4)
-    def _p4():
-        _send_chat("Which agencies need to coordinate?")
+    async def _p4():
+        await _send_chat("Which agencies need to coordinate?")
 
     @render.ui
     def chat_messages_ui():
@@ -1001,16 +1170,32 @@ def server(input, output, session):
                 ),
                 class_="chat-area",
             )
-        items = [
-            ui.div(m["content"],
-                   class_="chat-bubble-user" if m["role"] == "user" else "chat-bubble-bot")
-            for m in msgs
-        ]
+        items = []
+        for m in msgs:
+            if m["role"] == "user":
+                items.append(ui.div(m["content"], class_="chat-bubble-user"))
+            else:
+                rendered = md_lib.markdown(
+                    m["content"],
+                    extensions=["tables", "nl2br"],
+                )
+                items.append(ui.div(ui.HTML(rendered), class_="chat-bubble-bot"))
+        if is_typing():
+            items.append(
+                ui.div(
+                    ui.HTML('<div class="typing-indicator"><span></span><span></span><span></span></div>'),
+                    class_="chat-bubble-bot",
+                    style="padding:0;background:rgba(0,0,0,0.05);",
+                )
+            )
         return ui.div(*items, class_="chat-area")
 
 
 # ---------------------------------------------------------------------------
 # App entry point
 # ---------------------------------------------------------------------------
+
+# Thread pool for chatbot calls — isolates asyncio.run() from Shiny's event loop
+_CHAT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
 app = App(app_ui, server, static_assets=str(WWW_DIR))
