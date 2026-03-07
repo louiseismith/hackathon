@@ -63,8 +63,8 @@ METRICS = {
 
 
 _MNAMES = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ]
 
 # ---------------------------------------------------------------------------
@@ -1365,7 +1365,7 @@ app_ui = ui.page_fillable(
                 ui.input_select(
                     "sel_month", None,
                     choices=MONTHS_ORD,
-                    selected="March" if "March" in MONTHS_ORD else (MONTHS_ORD[0] if MONTHS_ORD else None),
+                    selected="Mar" if "Mar" in MONTHS_ORD else (MONTHS_ORD[0] if MONTHS_ORD else None),
                     width="100%"),
                 ui.input_numeric(
                     "sel_day", None,
