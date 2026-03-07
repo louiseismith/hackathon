@@ -141,6 +141,81 @@ def create_agent() -> Agent:
     return agent
 
 
+def run_cd_summary(cd_id: str, date: str, return_history: bool = False):
+    """Generate a 2-3 sentence risk summary for a specific CD on a given date.
+
+    Returns a plain string by default. Pass return_history=True to get a dict
+    with keys 'response' and 'history' (for validation / testing).
+    """
+    agent = create_agent()
+    message = (
+        f"[Context: Today's date is {date}. Only use data up to and including {date}.]\n\n"
+        f"Give a concise risk summary for community district {cd_id} as of {date}. "
+        f"Call get_cd_snapshot first. Then in 2-3 sentences: state the current heat, hospital, and transit "
+        f"risk levels; highlight what is most concerning; and indicate whether conditions are typical or "
+        f"unusual for this time of year based on the monthly context. Be factual. Do not list recommendations."
+    )
+    result = agent.run_sync(message)
+    text = result.output or "Unable to generate summary."
+    if return_history:
+        return {"response": text, "history": result.all_messages()}
+    return text
+
+
+def run_cd_recommendations(cd_id: str, date: str, return_history: bool = False):
+    """Generate decision signals for NYCEM personnel for a specific CD.
+
+    Surfaces early-warning signals in plain language to support human decision-making —
+    not operational commands. Anything above the 75th percentile is worth flagging;
+    above 90th warrants proactive coordination.
+
+    Returns a plain string by default. Pass return_history=True to get a dict
+    with keys 'response' and 'history' (for validation / testing).
+    """
+    snapshot = get_cd_snapshot(cd_id, date)
+
+    from openai import OpenAI
+    client = OpenAI()
+
+    system = (
+        "You are a decision-support assistant for NYC Department of Emergency Management. "
+        "Your job is to help emergency management professionals notice early signals — "
+        "not to issue operational commands."
+    )
+    prompt = (
+        f"Based on the risk snapshot below for {cd_id} on {date}, write 2-3 sentences "
+        f"that surface what — if anything — warrants attention.\n\n"
+        f"Guidelines:\n"
+        f"- Use early-warning language: 'worth monitoring', 'starting to build', "
+        f"'consider flagging to...', 'may warrant a closer look'. Never use command language "
+        f"like 'activate', 'deploy', or 'redirect'.\n"
+        f"- Mention any metric whose monthly_context percentile exceeds 75 — these are early signals. "
+        f"Percentiles above 90 are more significant and suggest proactive coordination.\n"
+        f"- Use judgment on absolute values: if heat_index_risk is below 10, do not flag it as a "
+        f"heat signal regardless of its percentile — very low absolute values are not actionable. "
+        f"Similarly, do not flag a metric if its absolute value is clearly in the safe range.\n"
+        f"- Never quote percentile numbers. Translate into plain language: "
+        f"above 90th = 'among the highest on record', 75–90th = 'above typical', below 75th = 'typical'.\n"
+        f"- If all signals are typical, say so in one sentence and stop.\n"
+        f"- When flagging something, name the relevant domain specifically "
+        f"(hospital capacity, transit operations, emergency management) — not 'relevant stakeholders'.\n"
+        f"- Do not restate raw numbers. Focus on what the conditions mean for decision-making.\n\n"
+        f"Snapshot data:\n{json.dumps(snapshot, indent=2)}"
+    )
+    completion = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user",   "content": prompt},
+        ],
+        temperature=0.3,
+    )
+    text = completion.choices[0].message.content.strip() or "Unable to generate decision signals."
+    if return_history:
+        return {"response": text, "history": []}
+    return text
+
+
 def run_chat(user_message: str, current_date: str | None = None, message_history=None) -> dict:
     """Run the agent on one user message and return a dict with the reply and updated history.
 

@@ -64,6 +64,11 @@ ui <- navbarPage(
     .risk-table { font-size: 13px; }
     h4 { font-weight: 600; margin-bottom: 4px; }
     .metric-label { font-size: 11px; color: #888; margin-bottom: 12px; }
+    .cd-panel { background: #f9f9f9; border-left: 3px solid #6c757d; border-radius: 4px; padding: 12px 16px; margin-bottom: 12px; }
+    .cd-panel h5 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #555; margin-bottom: 8px; }
+    .cd-panel .ai-content { font-size: 14px; line-height: 1.6; }
+    .cd-panel-summary { border-left-color: #e05c2a; }
+    .cd-panel-recs    { border-left-color: #2a7ae0; }
     /* Make chat tab fill the viewport */
     #chat-tab-content { height: calc(100vh - 60px); display: flex; flex-direction: column; }
     #chat-tab-content bslib-sidebar-layout { flex: 1 1 0; min-height: 0; }
@@ -278,6 +283,7 @@ server <- function(input, output, session) {
     leafletProxy("risk_map", data = cd) |>
       clearShapes() |>
       addPolygons(
+        layerId     = ~cd_id,
         fillColor   = ~pal(vals),
         fillOpacity = 0.75,
         color       = "#ffffff",
@@ -303,6 +309,58 @@ server <- function(input, output, session) {
         title   = di$label,
         layerId = "legend"
       )
+  })
+
+  # --- CD click: AI summary modal ---
+
+  selected_cd <- reactiveVal(NULL)
+
+  observeEvent(input$risk_map_shape_click, {
+    click <- input$risk_map_shape_click
+    cd_id <- click$id
+    if (is.null(cd_id) || cd_id == "") return()
+
+    # Lookup neighborhood name from current map data
+    cd_data <- sf::st_drop_geometry(composite_data())
+    row      <- cd_data[cd_data$cd_id == cd_id, ]
+    nbhd     <- if (nrow(row) > 0) row$neighborhood[1] else cd_id
+
+    selected_cd(cd_id)
+
+    showModal(modalDialog(
+      title     = paste0(nbhd, " (", cd_id, ")"),
+      size      = "l",
+      easyClose = TRUE,
+      footer    = modalButton("Close"),
+      div(class = "cd-panel cd-panel-summary",
+        tags$h5("Risk Overview"),
+        div(class = "ai-content", uiOutput("cd_summary_ui"))
+      ),
+      div(class = "cd-panel cd-panel-recs",
+        tags$h5("Decision Signals"),
+        div(class = "ai-content", uiOutput("cd_recs_ui"))
+      )
+    ))
+  })
+
+  output$cd_summary_ui <- renderUI({
+    cd <- selected_cd()
+    req(cd)
+    result <- tryCatch(
+      chatbot_agent$run_cd_summary(cd, as.character(input$selected_date)),
+      error = function(e) paste0("Error generating summary: ", conditionMessage(e))
+    )
+    shiny::markdown(result)
+  })
+
+  output$cd_recs_ui <- renderUI({
+    cd <- selected_cd()
+    req(cd)
+    result <- tryCatch(
+      chatbot_agent$run_cd_recommendations(cd, as.character(input$selected_date)),
+      error = function(e) paste0("Error generating recommendations: ", conditionMessage(e))
+    )
+    shiny::markdown(result)
   })
 
   # Top 10 risk table
