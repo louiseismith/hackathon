@@ -1,12 +1,11 @@
 """
-PydanticAI agent for NYC Urban Risk: system prompt, 8 tools, run_sync.
+PydanticAI agent for NYC Urban Risk: system prompt, 7 tools, run_sync.
 """
 import json
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Load .env from workspace root (5381) when running from hackathon/chatbot
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 load_dotenv()
 
@@ -16,62 +15,73 @@ from .tools import (
     get_cd_snapshot,
     get_top_risk_cds,
     get_fastest_accelerating,
-    get_factor_breakdown,
     query_combined_risk,
     compare_to_historical_analogs,
-    get_borough_rollup,
     get_agency_coordination_recommendations,
+    get_multiyear_trend,
     GetCdSnapshotInput,
     GetTopRiskCdsInput,
     GetFastestAcceleratingInput,
-    GetFactorBreakdownInput,
     QueryCombinedRiskInput,
     CompareToHistoricalAnalogsInput,
-    GetBoroughRollupInput,
     GetAgencyCoordinationRecommendationsInput,
+    GetMultiyearTrendInput,
 )
 
 SYSTEM_PROMPT = """You are the NYC Urban Risk decision-support assistant for NYC Emergency Management.
-Your job is to answer questions about Community District risk using structured risk tools.
-You must use tool outputs for factual claims and numerical values. Do not invent data.
-When responding, explain: what district(s) are affected; the current risk level or trend for heat, hospital, and transit; the main drivers; whether risk is rising or critical for any factor; any relevant historical analogs; and any appropriate agency coordination suggestions.
-Respond in this structure: (1) Direct answer (2) Evidence with districts/metrics (3) Explanation of main drivers (4) Action/coordination if relevant.
-Community district IDs are like BX-03, MN-11, QN-04 (borough prefix + number). Dates are YYYY-MM-DD. Use today or the date the user asks about.
+Answer questions about Community District risk using the provided tools. Use tool outputs for all factual claims and numbers — never invent data.
 
-Skills / question types:
-- District briefing: use get_cd_snapshot and get_factor_breakdown (and optionally compare_to_historical_analogs).
-- Top-risk ranking: use get_top_risk_cds, optionally get_factor_breakdown for top districts.
-- Risk acceleration: use get_fastest_accelerating, optionally get_factor_breakdown.
-- Combined factor query: use query_combined_risk for "rising heat and hospital strain" etc.
-- Historical analog: use compare_to_historical_analogs.
-- Coordination: use get_cd_snapshot, get_factor_breakdown, get_agency_coordination_recommendations."""
+Response style
+- 1–2 short paragraphs maximum. Lead with the key finding — never open with "Based on...", "According to...", or similar phrasing.
+- When showing multiple districts or time periods, use a markdown table instead of a list. Use **bold** for the single most critical metric or district name.
+- Never describe a trend as rising or worsening if acceleration values are negative — report the actual direction.
+- Do not speculate about future conditions or seasonal forecasts. Only describe what the data shows.
 
-# Tool wrappers: single Pydantic arg so schema is clean for the LLM
+Risk scale
+- heat_index_risk: 0–100 (50+ = elevated, 80+ = severe)
+- total_capacity_pct: % hospital beds occupied (85%+ = strained, 95%+ = critical)
+- ed_wait_hours is a leading indicator for hospital strain — it rises before inpatient beds fill. Baseline is ~2.5 hours; 4+ hours is elevated; 6+ hours is critical. Always refer to this as "emergency room wait time" in responses, never "ED wait".
+- transit_delay_index: 0–100 (30+ = elevated, 60+ = severe disruption). Note: this score reflects both infrastructure quality and real-time disruption — districts with limited subway/bus coverage score higher even on calm days. Avoid comparing absolute transit values across districts; prefer get_fastest_accelerating or get_multiyear_trend to identify genuine change.
+
+Trend interpretation
+Slopes from get_multiyear_trend are in units per year:
+- heat_index_risk: >0.3/yr is significant
+- total_capacity_pct: >0.5%/yr indicates structural pressure
+- transit_delay_index: >0.4 pts/yr reflects accelerating infrastructure decay
+When a slope meaningfully exceeds these anchors, say so explicitly.
+
+Tool usage guide
+- District snapshot: get_cd_snapshot (driver fields already included).
+- Borough summary or single-day top-risk ranking: get_top_risk_cds with borough filter.
+- Sustained top-risk ranking (over a period): get_top_risk_cds with start_date.
+- Short-term acceleration (days–weeks): get_fastest_accelerating, window_days 7–30. Use this for questions with "rising", "increasing", or "getting worse" language.
+- Long-term trend / year-over-year: get_multiyear_trend; use month_start/month_end to isolate a season (e.g. 6–8 for summer heat analysis).
+- Currently elevated across multiple factors ("simultaneous" or "both"): query_combined_risk.
+- Sustained combined risk over a period: query_combined_risk with start_date.
+- Historical analog: compare_to_historical_analogs.
+- Coordination: get_agency_coordination_recommendations.
+
+Community district IDs: BX-03, MN-11, QN-04 (borough prefix + number). Dates: YYYY-MM-DD."""
 
 
 def tool_get_cd_snapshot(args: GetCdSnapshotInput) -> str:
-    """Return current or selected-date risk snapshot for one community district (heat, hospital, transit, primary_concern)."""
+    """Return current or selected-date risk snapshot for one community district (heat, hospital, transit, primary_concern, drivers)."""
     return json.dumps(get_cd_snapshot(args.cd_id, args.date))
 
 
 def tool_get_top_risk_cds(args: GetTopRiskCdsInput) -> str:
-    """Return highest-risk community districts for a date; rank by heat, hospital, transit, or any (worst of three)."""
-    return json.dumps(get_top_risk_cds(args.date, args.top_k, args.borough, args.factor))
+    """Return highest-risk community districts for a date or date range; rank by heat, hospital, transit, or any (worst of three)."""
+    return json.dumps(get_top_risk_cds(args.date, args.top_k, args.borough, args.factor, args.start_date))
 
 
 def tool_get_fastest_accelerating(args: GetFastestAcceleratingInput) -> str:
-    """Return districts where risk factors are rising the fastest (week-over-week acceleration)."""
+    """Return districts where risk factors are rising the fastest over the given window (use window_days 7–365)."""
     return json.dumps(get_fastest_accelerating(args.date, args.window_days, args.top_k, args.borough, args.factor))
 
 
-def tool_get_factor_breakdown(args: GetFactorBreakdownInput) -> str:
-    """Explain which risk factors (heat, hospital, transit) are driving concern in a district."""
-    return json.dumps(get_factor_breakdown(args.cd_id, args.date))
-
-
 def tool_query_combined_risk(args: QueryCombinedRiskInput) -> str:
-    """Return districts where multiple factors meet a condition (e.g. heat and hospital both elevated)."""
-    return json.dumps(query_combined_risk(args.date, args.factors, args.condition, args.top_k))
+    """Return districts where multiple factors meet a condition on a single day or sustained over a date range."""
+    return json.dumps(query_combined_risk(args.date, args.factors, args.condition, args.top_k, args.start_date))
 
 
 def tool_compare_to_historical_analogs(args: CompareToHistoricalAnalogsInput) -> str:
@@ -79,18 +89,18 @@ def tool_compare_to_historical_analogs(args: CompareToHistoricalAnalogsInput) ->
     return json.dumps(compare_to_historical_analogs(args.cd_id, args.date, args.top_k))
 
 
-def tool_get_borough_rollup(args: GetBoroughRollupInput) -> str:
-    """Summarize district-level conditions at borough level (averages, highest-concern CDs, trend)."""
-    return json.dumps(get_borough_rollup(args.borough, args.date))
-
-
 def tool_get_agency_coordination_recommendations(args: GetAgencyCoordinationRecommendationsInput) -> str:
     """Map district risk factors to agencies to notify and suggested coordination actions."""
     return json.dumps(get_agency_coordination_recommendations(args.cd_id, args.date))
 
 
+def tool_get_multiyear_trend(args: GetMultiyearTrendInput) -> str:
+    """Return year-over-year averages and slope for a risk factor across a CD or borough (2020–present). Use month_start/month_end for seasonal isolation."""
+    return json.dumps(get_multiyear_trend(args.factor, args.cd_id, args.borough, args.month_start, args.month_end))
+
+
 def create_agent() -> Agent:
-    """Create and return the PydanticAI agent with all 8 tools."""
+    """Create and return the PydanticAI agent with all 7 tools."""
     agent = Agent(
         "openai:gpt-4o-mini",
         deps_type=None,
@@ -99,21 +109,21 @@ def create_agent() -> Agent:
             tool_get_cd_snapshot,
             tool_get_top_risk_cds,
             tool_get_fastest_accelerating,
-            tool_get_factor_breakdown,
             tool_query_combined_risk,
             tool_compare_to_historical_analogs,
-            tool_get_borough_rollup,
             tool_get_agency_coordination_recommendations,
+            tool_get_multiyear_trend,
         ],
     )
     return agent
 
 
-def run_chat(user_message: str, current_date: str | None = None) -> str:
-    """Run the agent on one user message and return the assistant reply text.
+def run_chat(user_message: str, current_date: str | None = None, message_history=None) -> dict:
+    """Run the agent on one user message and return a dict with the reply and updated history.
 
     current_date: if provided, injected as context so the agent treats it as
     'today' and restricts queries to data on or before this date.
+    message_history: list of prior ModelMessage objects from previous run_chat calls.
     """
     agent = create_agent()
     if current_date:
@@ -124,5 +134,8 @@ def run_chat(user_message: str, current_date: str | None = None) -> str:
         )
     else:
         message = user_message
-    result = agent.run_sync(message)
-    return result.output or "I couldn't generate a response. Please try rephrasing or specifying a date/CD."
+    result = agent.run_sync(message, message_history=message_history or [])
+    return {
+        "response": result.output or "I couldn't generate a response. Please try rephrasing or specifying a date/CD.",
+        "history": result.all_messages(),
+    }

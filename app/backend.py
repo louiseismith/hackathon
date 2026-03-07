@@ -57,13 +57,9 @@ def get_risk_data(date_str: str) -> list[dict]:
                     h.cd_id,
                     cd.borough,
                     cd.neighborhood,
-                    AVG(h.heat_index_risk)    AS heat_index_risk,
-                    AVG(h.temperature_f)      AS temperature_f,
-                    AVG(h.humidity_pct)       AS humidity_pct,
+                    AVG(h.heat_index_risk)     AS heat_index_risk,
                     AVG(hc.total_capacity_pct) AS total_capacity_pct,
-                    AVG(hc.icu_capacity_pct)  AS icu_capacity_pct,
-                    AVG(hc.ed_wait_hours)     AS ed_wait_hours,
-                    AVG(t.transit_delay_index) AS transit_delay_index
+                    MAX(t.transit_delay_index) AS transit_delay_index
                 FROM heat_index h
                 JOIN community_districts cd ON cd.cd_id = h.cd_id
                 JOIN hospital_capacity  hc  ON hc.cd_id = h.cd_id AND hc.date = h.date

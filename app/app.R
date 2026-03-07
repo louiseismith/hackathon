@@ -44,11 +44,12 @@ date_range <- py_to_r(get_date_range())
 
 # Metric definitions: label, column, domain (for color scale), unit
 METRICS <- list(
-  heat_index_risk     = list(label = "Heat Index Risk",     col = "heat_index_risk",     domain = c(0, 100),  unit = "/ 100"),
-  total_capacity_pct  = list(label = "Hospital Capacity %", col = "total_capacity_pct",  domain = c(50, 100), unit = "%"),
-  icu_capacity_pct    = list(label = "ICU Capacity %",      col = "icu_capacity_pct",    domain = c(40, 100), unit = "%"),
-  ed_wait_hours       = list(label = "ED Wait Hours",       col = "ed_wait_hours",       domain = c(0, 12),   unit = "hrs"),
-  transit_delay_index = list(label = "Transit Delay Index", col = "transit_delay_index", domain = c(0, 100),  unit = "/ 100")
+  heat_index_risk     = list(label = "Heat Index Risk",     col = "heat_index_risk",     domain = c(0, 80),   unit = "/ 100",
+                             desc = "Normalized heat stress score based on temperature and humidity (0–100)."),
+  total_capacity_pct  = list(label = "Hospital Capacity %", col = "total_capacity_pct",  domain = c(50, 100), unit = "%",
+                             desc = "Share of hospital beds occupied, averaged over the past 7 days."),
+  transit_delay_index = list(label = "Transit Delay Index", col = "transit_delay_index", domain = c(0, 60),   unit = "/ 100",
+                             desc = "Transit vulnerability score combining network coverage and disruption (0–100). Districts with limited subway/bus access score higher even on calm days.")
 )
 
 # 1. UI ----
@@ -87,6 +88,13 @@ ui <- navbarPage(
             choiceValues = names(METRICS),
             selected     = names(METRICS)
           ),
+          div(
+            style = "font-size: 11px; color: #666; margin-top: 4px; margin-bottom: 8px; line-height: 1.6;",
+            tags$ul(
+              style = "padding-left: 14px; margin: 0;",
+              lapply(METRICS, function(m) tags$li(tags$strong(m$label), ": ", m$desc))
+            )
+          ),
           conditionalPanel(
             condition = "input.selected_metrics.length > 1",
             div(
@@ -118,11 +126,11 @@ ui <- navbarPage(
         sidebar = sidebar(
           width = 280,
           h5("Suggested prompts"),
-          actionButton("prompt1", "Which districts are highest risk today?",            class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
-          actionButton("prompt2", "Where is risk accelerating the fastest?",            class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
-          actionButton("prompt3", "Which districts show rising heat and hospital strain?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
-          actionButton("prompt4", "How does today compare to similar historical patterns in BX-03?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
-          actionButton("prompt5", "Which agencies need to coordinate for QN-04 today?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt1", "Which neighborhoods show rising heat and hospital strain?", class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt2", "Where is risk accelerating the fastest?",                   class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt3", "How does today compare to similar historical patterns?",     class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt4", "Is summer heat risk getting worse year over year?",          class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
+          actionButton("prompt5", "How has hospital capacity changed since 2020?",              class = "btn-block mb-2", style = "text-align: left; white-space: normal;"),
           hr()
         ),
         chat_ui("chat", fill = TRUE, placeholder = "Ask about NYC Community District risk (e.g. heat, hospital, transit)...")
@@ -136,16 +144,23 @@ ui <- navbarPage(
 server <- function(input, output, session) {
 
   # --- Chatbot helpers ---
+  chat_history <- reactiveVal(NULL)
+
   call_chat_api <- function(msg) {
     nid <- showNotification(
       tagList(tags$strong("Thinking..."), " this may take a few seconds"),
       duration = NULL, closeButton = FALSE, type = "message"
     )
     on.exit(removeNotification(nid))
-    tryCatch(
-      chatbot_agent$run_chat(msg, current_date = as.character(input$selected_date)),
-      error = function(e) paste0("Chatbot error: ", conditionMessage(e))
-    )
+    tryCatch({
+      result <- chatbot_agent$run_chat(
+        msg,
+        current_date    = as.character(input$selected_date),
+        message_history = chat_history()
+      )
+      chat_history(result$history)
+      result$response
+    }, error = function(e) paste0("Chatbot error: ", conditionMessage(e)))
   }
 
   observeEvent(input$chat_user_input, {
@@ -155,11 +170,11 @@ server <- function(input, output, session) {
   })
 
   suggest_send <- function(prompt) chat_append("chat", call_chat_api(prompt))
-  observeEvent(input$prompt1, suggest_send("Which districts are highest risk today?"))
+  observeEvent(input$prompt1, suggest_send("Which neighborhoods show rising heat and hospital strain?"))
   observeEvent(input$prompt2, suggest_send("Where is risk accelerating the fastest?"))
-  observeEvent(input$prompt3, suggest_send("Which community districts show rising heat and hospital strain?"))
-  observeEvent(input$prompt4, suggest_send("How does today compare to similar historical patterns in BX-03?"))
-  observeEvent(input$prompt5, suggest_send("Which agencies need to coordinate for QN-04 today?"))
+  observeEvent(input$prompt3, suggest_send("How does today compare to similar historical patterns?"))
+  observeEvent(input$prompt4, suggest_send("Is summer heat risk getting worse year over year?"))
+  observeEvent(input$prompt5, suggest_send("How has hospital capacity changed since 2020?"))
 
   # --- Map ---
 
@@ -224,7 +239,7 @@ server <- function(input, output, session) {
     cd   <- composite_data()
     di   <- display_info()
     vals <- cd$display_val
-    pal  <- colorNumeric("RdYlGn", domain = di$domain, reverse = TRUE, na.color = "#cccccc")
+    pal  <- colorNumeric("plasma", domain = di$domain, reverse = FALSE, na.color = "#cccccc")
 
     if (di$type == "single") {
       labels <- sprintf(

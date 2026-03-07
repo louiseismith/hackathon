@@ -79,3 +79,28 @@ def query_for_two_dates(date_str: str, prior_date_str: str, borough: str | None 
 def query_cd_history(cd_id: str) -> pd.DataFrame:
     """Full history for one CD — used by the historical analogs tool."""
     return _run(_BASE_SELECT + " WHERE h.cd_id = %s ORDER BY h.date", [cd_id])
+
+
+def query_for_date_range(start_date: str, end_date: str, cd_id: str | None = None, borough: str | None = None) -> pd.DataFrame:
+    """All columns for a date range. Optionally narrow to one CD or one borough."""
+    where, params = ["h.date BETWEEN %s AND %s"], [start_date, end_date]
+    if cd_id:
+        where.append("h.cd_id = %s")
+        params.append(cd_id)
+    if borough:
+        where.append("cd.borough ILIKE %s")
+        params.append(borough)
+    return _run(_BASE_SELECT + " WHERE " + " AND ".join(where) + " ORDER BY h.date", params)
+
+
+def query_full_history(cd_id: str | None = None, borough: str | None = None) -> pd.DataFrame:
+    """Full history for one CD or borough — used by the multiyear trend tool."""
+    where, params = [], []
+    if cd_id:
+        where.append("h.cd_id = %s")
+        params.append(cd_id)
+    if borough:
+        where.append("cd.borough ILIKE %s")
+        params.append(borough)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    return _run(_BASE_SELECT + clause + " ORDER BY h.date", params)
