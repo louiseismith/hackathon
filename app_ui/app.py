@@ -235,7 +235,14 @@ def _build_folium_map(boundaries, risk_by_cd, layer_label):
         tooltip=folium.GeoJsonTooltip(
             fields=["borough", "neighborhood", "cd_id", "_vfmt"],
             aliases=["Borough:", "Community District:", "CD ID:", f"{layer_label}:"],
-            style="font-family:system-ui;font-size:13px;",
+            style=(
+                "font-family:system-ui;font-size:10px;"
+                "background:rgba(255,255,255,0.85);"
+                "border-radius:6px;"
+                "padding:4px 8px;"
+                "border:1px solid rgba(0,0,0,0.08);"
+                "box-shadow:0 2px 6px rgba(0,0,0,0.12);"
+            ),
         ),
     ).add_to(m)
 
@@ -1378,6 +1385,7 @@ app_ui = ui.page_fillable(
                         "<br><strong>Hospital Capacity</strong>: how full local hospitals and ICUs are. "
                         "<br><strong>Transit Delay Index</strong>: typical transit slowdowns affecting access to care. "
                         "<br><strong>Composite Score</strong>: combined index of heat, hospital, and transit risk (higher = more risk)."
+                        "<br><span style='font-size:7.5px;color:#64748b;margin-top:3px;display:inline-block;'>*Values shown on the map are 7-day rolling averages.</span>"
                     ),
                     class_="risk-layer-note",
                 ),
