@@ -585,6 +585,17 @@ def _legend_html(layer_info):
 
 
 # ---------------------------------------------------------------------------
+# Prompt button inline style — override Bootstrap 5 CSS variables + direct properties
+_PROMPT_BTN_STYLE = (
+    "--bs-btn-bg:#0d0887;--bs-btn-color:white;--bs-btn-border-color:transparent;"
+    "--bs-btn-hover-bg:#7e03a8;--bs-btn-hover-color:white;"
+    "--bs-btn-active-bg:#7e03a8;--bs-btn-active-color:white;"
+    "background-color:#0d0887;color:white;border:none;border-radius:6px;"
+    "font-size:9px;padding:4px 8px;line-height:1.3;text-align:left;"
+    "white-space:normal;width:100%;cursor:pointer;"
+    "box-shadow:0 1px 3px rgba(13,8,135,0.25);"
+)
+
 # App CSS
 # ---------------------------------------------------------------------------
 
@@ -690,20 +701,32 @@ html, body {
     grid-template-columns: 1fr 1fr;
     gap: 3px;
 }
-/* Sidebar prompt buttons — compact 2-col grid */
-.chat-panel-prompts .btn-outline-primary {
+/* Sidebar prompt buttons — match Search button style */
+.prompt-btn,
+button#prompt1, button#prompt2, button#prompt3, button#prompt4, button#prompt5 {
+    -webkit-appearance: none !important;
+    appearance: none !important;
     font-size: 9px !important;
-    padding: 3px 6px !important;
+    padding: 4px 8px !important;
     line-height: 1.3 !important;
-    background: transparent !important;
-    border-color: rgba(37,99,235,0.4) !important;
-    color: #2563eb !important;
+    background-color: #0d0887 !important;
+    background: #0d0887 !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 6px !important;
+    box-shadow: 0 1px 3px rgba(13,8,135,0.25) !important;
     text-align: left !important;
     white-space: normal !important;
     width: 100% !important;
+    cursor: pointer !important;
+    display: block !important;
 }
-.chat-panel-prompts .btn-outline-primary:hover {
-    background: rgba(37,99,235,0.06) !important;
+.prompt-btn:hover,
+button#prompt1:hover, button#prompt2:hover, button#prompt3:hover,
+button#prompt4:hover, button#prompt5:hover {
+    background-color: #7e03a8 !important;
+    background: #7e03a8 !important;
+    color: white !important;
 }
 /* Messages card — explicit height so it fills available space
    regardless of bslib flex chain: 100vh minus header/gap/tabs/prompts/input */
@@ -1178,21 +1201,16 @@ app_ui = ui.page_fillable(
                                 class_="chat-panel-prompts-header",
                             ),
                             ui.div(
-                                ui.input_action_button(
-                                    "prompt1", "Which neighborhoods show rising heat and hospital strain?",
-                                    class_="btn btn-outline-primary btn-sm"),
-                                ui.input_action_button(
-                                    "prompt2", "Where is risk accelerating the fastest?",
-                                    class_="btn btn-outline-primary btn-sm"),
-                                ui.input_action_button(
-                                    "prompt3", "How does today compare to similar historical patterns?",
-                                    class_="btn btn-outline-primary btn-sm"),
-                                ui.input_action_button(
-                                    "prompt4", "Is summer heat risk getting worse year over year?",
-                                    class_="btn btn-outline-primary btn-sm"),
-                                ui.input_action_button(
-                                    "prompt5", "How has hospital capacity changed since 2020?",
-                                    class_="btn btn-outline-primary btn-sm"),
+                                ui.tags.button("Which neighborhoods show rising heat and hospital strain?",
+                                    id="prompt1", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("Where is risk accelerating the fastest?",
+                                    id="prompt2", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("How does today compare to similar historical patterns?",
+                                    id="prompt3", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("Is summer heat risk getting worse year over year?",
+                                    id="prompt4", type="button", class_="action-button prompt-btn"),
+                                ui.tags.button("How has hospital capacity changed since 2020?",
+                                    id="prompt5", type="button", class_="action-button prompt-btn"),
                                 class_="chat-panel-prompts-grid",
                             ),
                             class_="chat-panel-prompts",
